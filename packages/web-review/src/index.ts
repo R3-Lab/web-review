@@ -22,7 +22,13 @@ export * from "./client/http-adapter";
 export * from "./client/use-focus-trap";
 export * from "./client/use-location";
 export * from "./overlay/review-overlay";
-export * from "./overlay/overlay-root";
+export type {
+  ComposerRenderProps,
+  OverlayRootProps,
+  PanelRenderProps,
+  ShotState,
+  UnlockRenderProps,
+} from "./overlay/overlay-root";
 export * from "./overlay/composer";
 export * from "./overlay/panel";
 export * from "./overlay/thread-detail";
