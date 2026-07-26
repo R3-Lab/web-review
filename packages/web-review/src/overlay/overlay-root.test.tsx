@@ -493,16 +493,34 @@ describe("highlight visibility", () => {
 });
 
 describe("gate", () => {
-  it("unmounts entirely when the adapter reports the feature disabled (404 not_found)", async () => {
+  it("unmounts entirely when the adapter reports the feature disabled (404 feature_disabled)", async () => {
     const adapter = makeAdapter([]);
     adapter.listThreads = vi.fn(() => {
-      throw new ReviewApiError(404, "disabled", "not_found");
+      throw new ReviewApiError(404, "disabled", "feature_disabled");
     });
 
     const { container } = renderOverlay({ adapter });
 
     await waitFor(() => expect(container).toBeEmptyDOMElement());
     expect(document.body.querySelector(`[${OVERLAY_ATTR}]`)).toBeNull();
+  });
+
+  // WP19 regression: a 404 for an unrelated reason (e.g. an unknown thread
+  // id, coded `not_found`) must NOT be mistaken for the feature being
+  // switched off — `isFeatureDisabled` only recognizes `feature_disabled`.
+  // The probe fails soft here (see `OverlayRoot`'s `probe` callback), so the
+  // overlay stays mounted rather than tearing itself down over an
+  // unrelated, likely transient, 404.
+  it("does NOT unmount for a 404 carrying an unrelated code (e.g. not_found)", async () => {
+    const adapter = makeAdapter([]);
+    adapter.listThreads = vi.fn(() => {
+      throw new ReviewApiError(404, "missing", "not_found");
+    });
+
+    renderOverlay({ adapter });
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    expect(document.body.querySelector(`[${OVERLAY_ATTR}]`)).not.toBeNull();
   });
 });
 

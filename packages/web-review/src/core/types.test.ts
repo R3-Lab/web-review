@@ -196,9 +196,9 @@ describe("ReviewApiError helpers", () => {
   });
 
   describe("isFeatureDisabled", () => {
-    it("is true only when BOTH status 404 and code 'not_found' are present", () => {
+    it("is true only when BOTH status 404 and code 'feature_disabled' are present", () => {
       expect(
-        isFeatureDisabled(new ReviewApiError(404, "off", "not_found")),
+        isFeatureDisabled(new ReviewApiError(404, "off", "feature_disabled")),
       ).toBe(true);
     });
 
@@ -211,9 +211,30 @@ describe("ReviewApiError helpers", () => {
       ).toBe(false);
     });
 
-    it("is false on a non-404 status even with code 'not_found'", () => {
+    // The defect this guards against: `not_found` (an unknown/malformed
+    // thread id — see `src/next/routes.ts`) must NOT be treated as the
+    // feature being disabled, even though both are 404s. Before WP19, this
+    // package's only 404 code WAS `not_found`, which made this
+    // indistinguishable from the kill switch — see `isFeatureDisabled`'s
+    // doc comment in `./adapter` and `src/next/routes.test.ts`'s "404 code
+    // discrimination" suite for the end-to-end regression proof.
+    it("is false on a 404 carrying code 'not_found' (an unknown thread, not a disabled feature)", () => {
       expect(
-        isFeatureDisabled(new ReviewApiError(400, "bad", "not_found")),
+        isFeatureDisabled(new ReviewApiError(404, "missing", "not_found")),
+      ).toBe(false);
+    });
+
+    it("is false on a 404 carrying code 'screenshots_unsupported'", () => {
+      expect(
+        isFeatureDisabled(
+          new ReviewApiError(404, "no screenshots", "screenshots_unsupported"),
+        ),
+      ).toBe(false);
+    });
+
+    it("is false on a non-404 status even with code 'feature_disabled'", () => {
+      expect(
+        isFeatureDisabled(new ReviewApiError(400, "bad", "feature_disabled")),
       ).toBe(false);
     });
 
@@ -242,8 +263,12 @@ describe("ReviewApiError helpers", () => {
     });
 
     it("reports the feature as disabled on 404", () => {
+      // `unlockErrorMessage` reacts to status alone, not the code — but the
+      // real 404 `/unlock` produces on a disabled feature carries
+      // `feature_disabled` (see `src/next/routes.ts`), so the fixture uses
+      // that code here too rather than a stale/unrelated one.
       expect(
-        unlockErrorMessage(new ReviewApiError(404, "off", "not_found")),
+        unlockErrorMessage(new ReviewApiError(404, "off", "feature_disabled")),
       ).toBe("Review is not enabled on this deployment.");
     });
 

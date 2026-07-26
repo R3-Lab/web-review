@@ -287,7 +287,7 @@ calling server functions or a GraphQL API directly from the client).
 
 Failures are communicated by throwing `ReviewApiError(status, message, code?, retryAfterSec?)`
 (exported from the main entry and from `./server`). `isLocked(err)` (status
-401), `isFeatureDisabled(err)` (status 404 + code `not_found`), and
+401), `isFeatureDisabled(err)` (status 404 + code `feature_disabled`), and
 `unlockErrorMessage(err)` are the helpers the overlay itself uses to react to
 those errors — reuse them if you write a custom adapter.
 
@@ -305,7 +305,7 @@ above is one concrete implementation of it.
 | `createThread` | yes | `{ thread; comment }` | **Must insert the thread and its opening comment atomically** — both commit or neither does. A thread without its first comment is a row the UI can't render. Use an interactive transaction (`db.transaction`, Prisma's `$transaction`) where your driver supports one; on an HTTP-only driver with no session (e.g. Neon's HTTP driver), a batched multi-statement call that the backend executes as one transaction also satisfies this. |
 | `addComment` | yes | `ReviewCommentRow \| null` | Should also bump the parent thread's `updatedAt`. `null` ⇒ 404 (an id that fails UUID validation never even reaches this method — the route answers 404 before calling it). |
 | `setStatus` | yes | `{ thread; comments } \| null` | Reopening must clear `resolvedAt`/`resolvedBy` regardless of the `resolvedBy` argument. |
-| `putScreenshot` | optional | `(bytes: Uint8Array, contentType: string) => Promise<string>` | The returned key **must** match `` `${keyPrefix}/<safe-chars>.png` `` (default prefix `"review"`, configurable via `screenshot.keyPrefix`) or the client's follow-up `POST /threads` will reject it with 400 `bad_request` — this check exists so a reviewer can't point `screenshotKey` at an arbitrary object in your bucket. Omit to answer a clean 404 on `POST /screenshot`. |
+| `putScreenshot` | optional | `(bytes: Uint8Array, contentType: string) => Promise<string>` | The returned key **must** match `` `${keyPrefix}/<safe-chars>.png` `` (default prefix `"review"`, configurable via `screenshot.keyPrefix`) or the client's follow-up `POST /threads` will reject it with 400 `bad_request` — this check exists so a reviewer can't point `screenshotKey` at an arbitrary object in your bucket. Omit to answer a clean 404 `screenshots_unsupported` on `POST /screenshot`. |
 | `screenshotUrl` | optional | `(key: string) => string \| null` | Compose a public URL (R2, S3, a CDN, a signed-URL minter) from a `putScreenshot` key. Omit to always report `screenshotUrl: null`. |
 
 `ReviewThreadRow`/`ReviewCommentRow` are **structural** interfaces (from
@@ -325,26 +325,37 @@ defaults to `/api/review`.
 
 | Method | Path | Body | Success | Error codes |
 |---|---|---|---|---|
-| `POST` | `{base}/unlock` | `{ password }` | 200 `{ ok: true }`, sets the access cookie | 400 `bad_request` · 401 `invalid_password` · 429 `too_many_attempts` (with `Retry-After`) · 404 `not_found` if the feature is off |
-| `GET` | `{base}/threads?urlKey=&status=&project=&limit=` | — | 200 `{ threads }` | 400 `bad_request` · 400 `url_key_required` (non-admin caller omitted `urlKey`) · 401 `locked` · 404 `not_found` |
-| `POST` | `{base}/threads` | `NewThreadInput` | 201 `{ thread }` | 400 `bad_request` · 401 `locked` · 404 `not_found` |
-| `GET` | `{base}/threads/:id` | — | 200 `{ thread }` | 401 `locked` · 404 `not_found` |
-| `PATCH` | `{base}/threads/:id` | `{ status, resolvedBy? }` | 200 `{ thread }` | 400 `bad_request` · 401 `locked` · 404 `not_found` |
-| `POST` | `{base}/threads/:id/comments` | `NewCommentInput` | 201 `{ comment }` | 400 `bad_request` · 401 `locked` · 404 `not_found` |
-| `POST` | `{base}/screenshot` | `FormData` (field `file`) | 201 `{ key }` | 400 `invalid_form`/`no_file`/`not_a_png`/`too_large`/`too_small` · 401 `locked` · 404 `not_found` if `putScreenshot` isn't implemented |
+| `POST` | `{base}/unlock` | `{ password }` | 200 `{ ok: true }`, sets the access cookie | 400 `bad_request` · 401 `invalid_password` · 429 `too_many_attempts` (with `Retry-After`) · 404 `feature_disabled` if the feature is off |
+| `GET` | `{base}/threads?urlKey=&status=&project=&limit=` | — | 200 `{ threads }` | 400 `bad_request` · 400 `url_key_required` (non-admin caller omitted `urlKey`) · 401 `locked` · 404 `feature_disabled` |
+| `POST` | `{base}/threads` | `NewThreadInput` | 201 `{ thread }` | 400 `bad_request` · 401 `locked` · 404 `feature_disabled` |
+| `GET` | `{base}/threads/:id` | — | 200 `{ thread }` | 401 `locked` · 404 `feature_disabled` (kill switch) · 404 `not_found` (`id` doesn't exist, or fails UUID validation) |
+| `PATCH` | `{base}/threads/:id` | `{ status, resolvedBy? }` | 200 `{ thread }` | 400 `bad_request` · 401 `locked` · 404 `feature_disabled` (kill switch) · 404 `not_found` (`id` doesn't exist, or fails UUID validation) |
+| `POST` | `{base}/threads/:id/comments` | `NewCommentInput` | 201 `{ comment }` | 400 `bad_request` · 401 `locked` · 404 `feature_disabled` (kill switch) · 404 `not_found` (`id` doesn't exist, or fails UUID validation) |
+| `POST` | `{base}/screenshot` | `FormData` (field `file`) | 201 `{ key }` | 400 `invalid_form`/`no_file`/`not_a_png`/`too_large`/`too_small` · 401 `locked` · 404 `feature_disabled` (kill switch) · 404 `screenshots_unsupported` (`putScreenshot` isn't implemented) |
 
 Every response carries `Cache-Control: no-store` and
 `X-Robots-Tag: noindex, nofollow, noarchive`.
 
-One wrinkle worth knowing if you build your own client against this API
-directly: `not_found` 404 is the literal body for *every* 404 this API
-returns — the feature's kill switch being off, an unknown or malformed
-thread id, and the screenshot endpoint being unimplemented are all
-indistinguishable on the wire. `isFeatureDisabled()` (status 404 + code
-`not_found`) can't tell those apart either. In the shipped overlay this
-doesn't bite: it only calls `isFeatureDisabled` on the initial `listThreads`
-probe, which has no per-id "not found" case to collide with. It would bite a
-caller that checks `isFeatureDisabled` after a `getThread(badId)` call.
+Every 404 this API returns carries one of three codes, each meaning a
+different thing:
+
+- **`feature_disabled`** — the kill switch is off (no password/secret
+  configured). Every route 404s this way, including for an admin
+  `isAdmin` would otherwise let in — there is deliberately no open
+  fallback. This is the ONLY code `isFeatureDisabled()` (status 404 + code
+  `feature_disabled`) recognizes; it's what tells the overlay there is
+  nothing to unlock and to render nothing at all.
+- **`not_found`** — the request named a thread that doesn't exist, or an
+  `id` that fails UUID validation (deliberately answered 404 rather than
+  400, so a malformed id and a missing row look the same to a caller). A
+  perfectly ordinary condition, not a sign the feature is off.
+- **`screenshots_unsupported`** — `POST /screenshot` was called but the
+  `ReviewStore` never implemented `putScreenshot`.
+
+Because these are distinguishable, a custom `ReviewAdapter` (or a caller
+building its own client against this API) can safely call `getThread(badId)`
+and check `isFeatureDisabled()` on the result — it correctly returns
+`false`, since that 404 carries `not_found`, not `feature_disabled`.
 
 ## Database schema
 
