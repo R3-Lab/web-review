@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build-and-test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        # engines.node in package.json declares >=20; both supported majors
+        # are exercised here even though local dev uses Node 24, so a
+        # Node-24-only regression is caught here instead of papered over.
+        node-version: [20, 22]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      # Must run before actions/setup-node's `cache: pnpm` below — pnpm
+      # itself has to be on PATH before setup-node can locate and cache its
+      # store.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      # `pnpm test` also runs its own `pretest` build (see
+      # packages/web-review/package.json) so the build-output assertions in
+      # build-output.test.ts always run against fresh dist/ output, never
+      # stale or absent — the explicit `Build` step above is kept anyway so
+      # a build failure is reported under its own step name rather than
+      # folded into the test step.
+      - name: Test
+        run: pnpm test
+
+  sql-postgres:
+    name: sql-verify (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: web_review_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      # `-v ON_ERROR_STOP=1` makes psql exit non-zero on the first failing
+      # statement — without it, psql logs errors to stderr but keeps
+      # running and can still exit 0, which would silently defeat this
+      # check.
+      - name: Apply postgres.sql (first run)
+        run: >-
+          psql -h localhost -U postgres -d web_review_ci
+          -v ON_ERROR_STOP=1
+          -f packages/web-review/sql/postgres.sql
+
+      - name: Verify tables exist (first run)
+        run: >-
+          psql -h localhost -U postgres -d web_review_ci -v ON_ERROR_STOP=1 -Atqc
+          "select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('review_thread', 'review_comment')"
+          | grep -qx 2
+
+      # Re-running the same DDL proves every statement in the file is
+      # idempotent (create table/index ... if not exists) as the file's own
+      # header comment claims. A non-idempotent statement here (e.g. a bare
+      # CREATE TABLE, or an INSERT) would make this second run fail.
+      - name: Apply postgres.sql (second run, idempotency check)
+        run: >-
+          psql -h localhost -U postgres -d web_review_ci
+          -v ON_ERROR_STOP=1
+          -f packages/web-review/sql/postgres.sql
+
+      - name: Verify tables still exist (second run)
+        run: >-
+          psql -h localhost -U postgres -d web_review_ci -v ON_ERROR_STOP=1 -Atqc
+          "select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('review_thread', 'review_comment')"
+          | grep -qx 2
+
+  sql-mysql:
+    name: sql-verify (mysql)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: web_review_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install mysql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mysql-client
+
+      # mysql's CLI aborts on the first SQL error and exits non-zero by
+      # default (unlike psql, no extra flag is needed for that behavior).
+      - name: Apply mysql.sql (first run)
+        run: >-
+          mysql -h127.0.0.1 -P3306 -uroot -proot web_review_ci
+          < packages/web-review/sql/mysql.sql
+
+      - name: Verify tables exist (first run)
+        run: |
+          count=$(mysql -h127.0.0.1 -P3306 -uroot -proot -N -B -e \
+            "select count(*) from information_schema.tables where table_schema = 'web_review_ci' and table_name in ('review_thread', 'review_comment')")
+          test "$count" = "2"
+
+      # Re-running the same DDL proves every statement in the file is
+      # idempotent, as the file's own header comment claims — MySQL has no
+      # `CREATE INDEX IF NOT EXISTS`, so this file inlines every index into
+      # `CREATE TABLE IF NOT EXISTS` specifically so the whole table
+      # (indexes included) is skipped on a second run; this step is what
+      # actually proves that design works, not just documents it.
+      - name: Apply mysql.sql (second run, idempotency check)
+        run: >-
+          mysql -h127.0.0.1 -P3306 -uroot -proot web_review_ci
+          < packages/web-review/sql/mysql.sql
+
+      - name: Verify tables still exist (second run)
+        run: |
+          count=$(mysql -h127.0.0.1 -P3306 -uroot -proot -N -B -e \
+            "select count(*) from information_schema.tables where table_schema = 'web_review_ci' and table_name in ('review_thread', 'review_comment')")
+          test "$count" = "2"
