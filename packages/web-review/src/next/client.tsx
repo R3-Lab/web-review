@@ -11,8 +11,22 @@
  * Renders **nothing at all** unless the tool is switched on: no DOM, no
  * fetches, no key handlers, no polling, no `MutationObserver` — and, because
  * the real overlay sits behind a `next/dynamic` boundary, not even its
- * JavaScript (or `../overlay/overlay.css`, or `@zumer/snapdom`) is evaluated
- * until the gate actually opens.
+ * JavaScript (or `../overlay/overlay.css`, or `@zumer/snapdom`) is EVALUATED
+ * until the gate actually opens: this file's own gate returns `false` before
+ * render ever reaches `<DynamicOverlayRoot>`, so `next/dynamic`'s loader
+ * (`loadWiredOverlayRoot`) is never called and the underlying `import()`
+ * never fires from application code.
+ *
+ * That is a guarantee about EXECUTION, not about download. See "Bundle
+ * cost" in the README for the one caveat that survives it: Next.js's
+ * Turbopack production builds can still ship the chunk's *bytes* in the
+ * initial HTML (as an unconditional `<script async>`) even with the gate
+ * closed, because Turbopack's own default chunking pre-fetches a route's
+ * entire async-import graph regardless of whether the runtime path that
+ * would trigger it is ever taken — confirmed not to be something this
+ * module's source shape controls (same result building from this package's
+ * `dist/` or straight from this file; `next build --webpack` does not have
+ * the problem).
  *
  * ## Why `next/dynamic`, not `React.lazy` — and why a parallel gate instead
  * of composing `ReviewOverlay`
@@ -66,10 +80,13 @@
  * below. In a build where env is the ONLY trigger a consumer relies on
  * (`config.enabled` left unset, no localStorage flag ever written), that
  * makes `readGate` provably return `false` and the gate stays closed, so
- * `DynamicOverlayRoot` is never rendered and its `next/dynamic` chunk is
- * never requested — the same "statically dead when off" property
+ * `DynamicOverlayRoot` is never rendered and its `next/dynamic` loader is
+ * never called — the same "statically dead when off" property
  * `../overlay/review-overlay`'s own doc comment attributes to its
- * `config.enabled`/localStorage gate, just with one more provably-dead input.
+ * `config.enabled`/localStorage gate, just with one more provably-dead
+ * input. See the file header's caveat above: "never called" is not the same
+ * claim as "the chunk's bytes are never requested" — Turbopack's own
+ * chunking can still put them on the wire.
  *
  * ## Default surfaces
  *

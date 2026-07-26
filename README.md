@@ -573,9 +573,34 @@ to the overlay chunk's filename — grep for both comes back empty.
 What that means in practice: `<ReviewOverlay config={...} enabled={false} />`
 (or the gate closed any other way — see [Configuration reference](#configuration-reference))
 renders `null` before the lazy component is ever reached, so its `import()`
-never fires. No DOM, no network request, no event handlers, and the ~22.7 KB
-overlay chunk is never fetched — only the entry's own few KB (which includes
-`resolveConfig` and the gate logic) ever loads.
+never fires and the overlay's module code never executes — no DOM, no
+request to `/api/review/*`, no event handlers. Only the entry's own few KB
+(which includes `resolveConfig` and the gate logic) ever runs.
+
+**Caveat, measured on Next.js + Turbopack:** that is a guarantee about
+*execution*, not about *download*. Next.js's Turbopack production builds
+(the default for plain `next build`, no flag needed, as of Next 16) pre-fetch
+a route's entire async-import chunk graph as unconditional `<script async>`
+tags in the initial HTML — including `next/dynamic`/`React.lazy` boundaries
+whose runtime gate is closed, since Turbopack decides this at build time
+from static reachability, with no visibility into the gate. Measured
+directly: building [`examples/next-demo`](examples/next-demo) with
+`NEXT_PUBLIC_REVIEW_ENABLED` unset, the overlay's ~36 KB chunk still appears
+in the page's initial `<script async>` list under Turbopack, but is absent
+from it under `next build --webpack`. This is not an artifact of this
+package's own build — the same result reproduces importing the package
+straight from source instead of its built `dist/`, and setting
+`transpilePackages` on the consumer's `next.config` makes no difference
+either. There is no documented Turbopack option to exempt one boundary from
+this; the only confirmed way to avoid the extra download today is `next
+build --webpack` for the consuming app.
+
+What stays true either way — confirmed against a real Turbopack build by
+this package's own E2E suite — is that the module never *runs*: no overlay
+DOM node ever appears, and no request to `/api/review/*` is ever made (which
+`OverlayRoot` would trigger from a `useEffect` on mount, immediately, if its
+code ever actually executed). The chunk's bytes can be downloaded without
+its code ever being called.
 
 ## Keyboard and accessibility
 
