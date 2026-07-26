@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -100,6 +100,63 @@ function directivePrologue(content: string): string {
  */
 function hasDirective(content: string, directive: string): boolean {
   return new RegExp(`["']${directive}["']`).test(directivePrologue(content));
+}
+
+/**
+ * Matches an ESM static import — `import { a, b } from "./x.js"`, `import
+ * ns from "./x.js"`, `import * as ns from "./x.js"`, or a bare
+ * side-effect-only `import "./x.js"` — but NOT a dynamic `import("./x.js")`
+ * call, because `import(` (no whitespace) never matches `import\s+`.
+ */
+const STATIC_IMPORT_RE = /import\s+(?:[^"'()]*?from\s+)?["'](\.[^"']+)["']/g;
+
+/** Matches only a dynamic `import("./x.js")` call expression. */
+const DYNAMIC_IMPORT_RE = /import\(\s*["'](\.[^"']+)["']\s*\)/g;
+
+/** True for defined values — narrows `(string | undefined)[]` to `string[]` without an assertion. */
+function isDefined(value: string | undefined): value is string {
+  return value !== undefined;
+}
+
+/** The relative-to-`distDir` import specifiers a file statically imports vs. dynamically `import()`s. */
+function parseImportTargets(content: string): { static: string[]; dynamic: string[] } {
+  return {
+    static: [...content.matchAll(STATIC_IMPORT_RE)].map((m) => m[1]).filter(isDefined),
+    dynamic: [...content.matchAll(DYNAMIC_IMPORT_RE)].map((m) => m[1]).filter(isDefined),
+  };
+}
+
+/** Resolve an import specifier found in `fromRelPath` to a path relative to `distDir`. */
+function resolveImportTarget(fromRelPath: string, target: string): string {
+  return relative(distDir, join(distDir, dirname(fromRelPath), target));
+}
+
+/**
+ * BFS the import graph starting at `entryRelPath` (exclusive) and return
+ * every file reachable from it. When `includeDynamic` is false, only
+ * `import ... from "..."` / bare `import "..."` edges are followed — the
+ * set a bundle would statically inline or reference by specifier. When
+ * true, `import()` edges are followed too, so this can answer "is X
+ * reachable at all" vs. "is X reachable WITHOUT a real code-split
+ * boundary".
+ */
+function collectReachable(entryRelPath: string, includeDynamic: boolean): Set<string> {
+  const seen = new Set<string>();
+  const queue = [entryRelPath];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const content = readFileSync(join(distDir, current), "utf8");
+    const { static: staticTargets, dynamic: dynamicTargets } = parseImportTargets(content);
+    const targets = includeDynamic ? [...staticTargets, ...dynamicTargets] : staticTargets;
+    for (const target of targets) {
+      const resolved = resolveImportTarget(current, target);
+      if (!seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  seen.delete(entryRelPath);
+  return seen;
 }
 
 describe.skipIf(!distExists)("dist/ build output", () => {
@@ -231,23 +288,89 @@ describe.skipIf(!distExists)("dist/ build output", () => {
       }
     });
 
-    it("dist/index.js and dist/next/client.js (ESM) each reach the overlay through a real import() to a separate file on disk", () => {
+    /**
+     * Regression test (WP17): the test above ("stay small") only proves the
+     * overlay isn't INLINED — it doesn't prove there's still a real
+     * `import()` boundary at all. This test used to assert that a literal
+     * `import(...)` appears IN the entry file itself. That was true when
+     * WP15 wrote it (the entry called `import()` directly), but WP16 later
+     * introduced a shared loader (`default-surfaces.tsx`, bundled as its
+     * own chunk) that BOTH entries import statically and which itself owns
+     * the real `import()` calls — so the dynamic-import edge legitimately
+     * moved one level down the graph, from the entry into that loader
+     * chunk. The entry files never contained a literal `import(` again,
+     * failing the old, over-specific assertion even though the split was
+     * still completely real.
+     *
+     * What actually matters — and what this rewrite checks — isn't WHERE
+     * in the file tree the `import()` call sits, it's whether the overlay
+     * implementation is reachable from the entry WITHOUT one:
+     *
+     *   1. Identify the overlay chunk by CONTENT (it contains OverlayRoot's
+     *      actual function declaration), not by its hash-suffixed filename
+     *      — that hash changes every build, so hardcoding it would make
+     *      this test rot immediately.
+     *   2. Walk the entry's STATIC-only import graph (`from "..."`, bare
+     *      `import "...";`) and confirm the overlay chunk is NOT in it —
+     *      i.e. no static edge, however indirect, reaches it.
+     *   3. Walk the entry's import graph again, this time also following
+     *      `import()` edges, and confirm the overlay chunk IS in that
+     *      larger set — i.e. it's still genuinely reachable, just only
+     *      through a real dynamic-import boundary somewhere in the chain.
+     *
+     * This is strictly stronger than the old check: it survives the loader
+     * moving further down the tree, but still fails if the overlay were
+     * ever statically re-inlined (found in step 2) OR silently dropped
+     * from the bundle entirely (missing from step 3).
+     */
+    it("dist/index.js and dist/next/client.js (ESM) reach the overlay ONLY through a chain that includes a real import(), never statically", () => {
+      const overlayChunkCandidates = runtimeFiles.filter(
+        (relPath) =>
+          (relPath.endsWith(".js") || relPath.endsWith(".cjs")) &&
+          relPath !== "index.js" &&
+          relPath !== "next/client.js" &&
+          /function OverlayRoot\(/.test(readFileSync(join(distDir, relPath), "utf8")),
+      );
+      // Sanity on the detector itself: exactly one ESM chunk should hold
+      // the real implementation. Zero means the detector (or the build)
+      // silently lost `OverlayRoot`; more than one means chunking merged
+      // it somewhere unexpected — either way, the rest of this test can't
+      // trust its own chunk identification, so fail loudly here first.
+      const esmOverlayChunks = overlayChunkCandidates.filter((relPath) => relPath.endsWith(".js"));
+      expect(
+        esmOverlayChunks,
+        `expected exactly one ESM chunk containing OverlayRoot's function declaration, found: ${JSON.stringify(overlayChunkCandidates)}`,
+      ).toHaveLength(1);
+      const [overlayChunk] = esmOverlayChunks;
+      if (overlayChunk === undefined) {
+        // Unreachable: the toHaveLength(1) assertion above already failed
+        // (and threw) if this array weren't exactly one element long. This
+        // only exists to narrow the type without an `as`/`!` assertion.
+        throw new Error("unreachable: esmOverlayChunks.length === 1 was just asserted");
+      }
+
+      // The chunk we found should actually be substantial — the real
+      // overlay implementation is ~20-30 KB. A near-empty match here would
+      // mean the detector latched onto a decoy (e.g. a re-export shim)
+      // rather than the real implementation.
+      const overlayChunkSize = statSync(join(distDir, overlayChunk)).size;
+      expect(
+        overlayChunkSize,
+        `${overlayChunk} (detected as the overlay chunk) is only ${overlayChunkSize} bytes — too small to be the real OverlayRoot implementation`,
+      ).toBeGreaterThan(15_000);
+
       for (const relPath of splitEsmEntries) {
-        const content = readFileSync(join(distDir, relPath), "utf8");
-        const match = content.match(/import\(["'](\.[^"']+)["']\)/);
-        expect(match, `${relPath} should contain a dynamic import() to the overlay chunk`).not.toBeNull();
-        const target = match?.[1];
-        expect(target, `${relPath}: matched import() but couldn't extract its target path`).toBeDefined();
-        const resolvedTarget = join(distDir, relPath, "..", target ?? "");
-        expect(existsSync(resolvedTarget), `${relPath} references "${target}", which should exist in dist/`).toBe(
-          true,
-        );
-        // Not a same-file self-reference (which is what an inlined,
-        // `Promise.resolve()`-wrapped dynamic import degenerates to when
-        // splitting is off — see the file header above).
-        expect(resolvedTarget, `${relPath} should reference a DIFFERENT file, not itself`).not.toBe(
-          join(distDir, relPath),
-        );
+        const staticOnly = collectReachable(relPath, false);
+        expect(
+          staticOnly.has(overlayChunk),
+          `${relPath} statically reaches ${overlayChunk} (the overlay chunk) without going through a dynamic import() — this re-inlines the overlay into the entry's eager load path. Statically reachable set: ${JSON.stringify([...staticOnly])}`,
+        ).toBe(false);
+
+        const withDynamic = collectReachable(relPath, true);
+        expect(
+          withDynamic.has(overlayChunk),
+          `${relPath} never reaches ${overlayChunk} (the overlay chunk) even when following import() edges — the overlay appears to have been dropped from the bundle graph entirely. Reachable set: ${JSON.stringify([...withDynamic])}`,
+        ).toBe(true);
       }
     });
 
