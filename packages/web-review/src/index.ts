@@ -5,4 +5,8 @@
 // adapter used to mount the overlay in a consuming app. Implemented in
 // later work packages (WP1-WP4).
 
+export * from "./core/types";
+export * from "./core/adapter";
+export * from "./core/config";
+
 export const VERSION = "0.1.0";

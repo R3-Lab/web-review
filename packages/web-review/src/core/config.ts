@@ -1,0 +1,108 @@
+/**
+ * Consumer-facing configuration for the review overlay.
+ *
+ * `adapter` is the only required field — everything else has a sensible
+ * default. Call {@link resolveConfig} once (typically where the overlay is
+ * mounted) to get a fully-defaulted config, so the rest of the package
+ * reads non-optional fields instead of re-checking for `undefined`
+ * everywhere.
+ */
+
+import type { ReviewAdapter } from "./adapter";
+import { DEFAULT_CATEGORIES } from "./types";
+import type { ReviewCategoryDef } from "./types";
+
+export interface ReviewConfig {
+  /** How the overlay talks to your storage. The only required field. */
+  adapter: ReviewAdapter;
+  /** Namespaces threads/comments when one deployment hosts multiple apps. Default `"web"`. */
+  project?: string;
+  /** Categories offered when opening a new thread. Default {@link DEFAULT_CATEGORIES}. */
+  categories?: ReviewCategoryDef[];
+  /** Prefix for the overlay's localStorage keys (reviewer identity, dismissed prompts, …). Default `"r3wr"`. */
+  storagePrefix?: string;
+  /**
+   * Whether to attempt screenshot capture on new threads. Default `true`,
+   * but inert unless `adapter.uploadScreenshot` is implemented: with no
+   * upload method there is nowhere to send the capture, so it is skipped
+   * regardless of this flag.
+   */
+  screenshots?: boolean;
+  /**
+   * Derive a locale from the current page's `href`, stored on
+   * `ReviewThreadView.locale`. Default `() => null` (no locale).
+   */
+  localeFromHref?: (href: string) => string | null;
+  /**
+   * Derive the normalized page key (`ReviewThreadView.urlKey`) that groups
+   * threads by page. No default is available in this package yet — see the
+   * note on `ResolvedReviewConfig.urlKeyFromHref` below.
+   */
+  urlKeyFromHref?: (href: string) => string;
+  /**
+   * Require a successful `adapter.unlock` call before the overlay is
+   * usable. Default: `true` when `adapter.unlock` is present, `false`
+   * otherwise — there is nothing to unlock against when the adapter
+   * doesn't implement it.
+   */
+  requireUnlock?: boolean;
+  /**
+   * Explicit override of whether the overlay mounts at all. Leave unset to
+   * defer to the mount gate's own default (e.g. preview-deployment
+   * detection, owned by the client runtime that calls `resolveConfig`);
+   * set `true`/`false` here to force it on or off regardless of that
+   * default.
+   */
+  enabled?: boolean;
+  /** Gates the overlay's console diagnostics. Default `false`. */
+  debug?: boolean;
+}
+
+/**
+ * `ReviewConfig` with every computable default filled in. Downstream code
+ * should consume this, not `ReviewConfig`, so it never needs to repeat the
+ * defaulting logic in `resolveConfig`.
+ */
+export interface ResolvedReviewConfig {
+  adapter: ReviewAdapter;
+  project: string;
+  categories: ReviewCategoryDef[];
+  storagePrefix: string;
+  screenshots: boolean;
+  localeFromHref: (href: string) => string | null;
+  /**
+   * SEAM: this package's own URL-normalization helper (`normalizeUrl`, a
+   * later work package) is the intended default for this field, but it
+   * doesn't exist yet. Until it lands, `resolveConfig` does NOT invent a
+   * substitute — it passes `config.urlKeyFromHref` through unchanged, which
+   * is why this stays optional here. Callers that need a `urlKey` today
+   * must supply their own `urlKeyFromHref`. Wire the real default in here
+   * once that helper exists; do not add a competing implementation
+   * elsewhere in the meantime.
+   */
+  urlKeyFromHref?: (href: string) => string;
+  requireUnlock: boolean;
+  /**
+   * Left optional deliberately: `undefined` means "no override was given",
+   * and the mount gate (owned outside this file — see `ReviewConfig.enabled`)
+   * decides the actual default from there.
+   */
+  enabled?: boolean;
+  debug: boolean;
+}
+
+/** Fill in every default on `config`, producing a fully-resolved config. */
+export function resolveConfig(config: ReviewConfig): ResolvedReviewConfig {
+  return {
+    adapter: config.adapter,
+    project: config.project ?? "web",
+    categories: config.categories ?? DEFAULT_CATEGORIES,
+    storagePrefix: config.storagePrefix ?? "r3wr",
+    screenshots: config.screenshots ?? true,
+    localeFromHref: config.localeFromHref ?? (() => null),
+    urlKeyFromHref: config.urlKeyFromHref,
+    requireUnlock: config.requireUnlock ?? config.adapter.unlock != null,
+    enabled: config.enabled,
+    debug: config.debug ?? false,
+  };
+}
