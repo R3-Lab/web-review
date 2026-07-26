@@ -9,7 +9,20 @@
  * unless the tool is switched on: no DOM, no fetches, no key handlers, no
  * polling, no `MutationObserver` — and, because the real overlay sits behind
  * a `React.lazy` boundary, not even its JavaScript (or `./overlay.css`, or
- * `@zumer/snapdom`) is ever requested.
+ * `@zumer/snapdom`) is ever EVALUATED: `useOverlayActive` (below) returns
+ * `false` before render ever reaches `<LazyOverlayRoot>`, so `React.lazy`
+ * never calls `loadWiredOverlayRoot` and the underlying `import()` never
+ * fires from application code.
+ *
+ * That is a guarantee about execution, not about download. Whether the
+ * chunk's *bytes* ever reach the browser when it's switched off depends on
+ * the bundler wrapping this component: confirmed on Next.js, where
+ * Turbopack's production builds can still ship them in the initial HTML (an
+ * unconditional `<script async>`, regardless of this gate) while `next
+ * build --webpack` does not — see `../next/client.tsx`'s own header and
+ * "Bundle cost" in the README for the full account. Nothing about this
+ * file's own source controls that; it is purely the consuming bundler's
+ * chunking strategy for a statically-reachable `import()` boundary.
  *
  * Two ways to switch it on:
  *  1. `config.enabled: true` — how a consumer flips it on for a preview
