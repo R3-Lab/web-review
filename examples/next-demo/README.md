@@ -63,7 +63,10 @@ deployment would implement `putScreenshot` against R2/S3/etc.
 
    ```sh
    pnpm db:apply
-   # equivalent to: psql "$DATABASE_URL" -f ../../packages/web-review/sql/postgres.sql
+   # runs scripts/apply-sql.mjs, which reads DATABASE_URL from .env.local
+   # (pnpm scripts, unlike `next dev`/`next build`/`next start`, don't load
+   # .env.local on their own) and then runs:
+   #   psql "$DATABASE_URL" -f ../../packages/web-review/sql/postgres.sql
    ```
 
 5. **Run it**:
@@ -73,6 +76,12 @@ deployment would implement `putScreenshot` against R2/S3/etc.
    # or, to test a production build:
    pnpm build && pnpm start
    ```
+
+   `pnpm build` needs `DATABASE_URL` set — `next build` loads `.env.local`
+   itself and, unlike `dev`, evaluates every route handler module (including
+   `drizzle/client.ts`, which throws immediately if `DATABASE_URL` is unset)
+   while collecting page data. Postgres must already be up (step 2) and
+   `.env.local` in place (step 3) before running `pnpm build`.
 
 6. **Unlock the overlay** — with `NEXT_PUBLIC_REVIEW_ENABLED=1` (the
    `.env.example` default), the overlay's launcher button appears on the
@@ -86,6 +95,28 @@ deployment would implement `putScreenshot` against R2/S3/etc.
    docker compose down
    docker volume rm r3wr_demo_pgdata   # optional: also drop the data
    ```
+
+## End-to-end tests
+
+`e2e/` holds a Playwright suite that drives a real Chromium browser against a
+real build of this app and a real (throwaway) Postgres — no mocking. It
+covers unlock, pin drop → composer → submit, persistence straight from
+Postgres, a pin surviving a page reload re-anchored to the same element,
+text-selection anchoring, reply/resolve, drift, and that the overlay costs
+nothing (no DOM, no requests, chunk never fetched) when
+`NEXT_PUBLIC_REVIEW_ENABLED` is unset at build time.
+
+```sh
+pnpm e2e   # from the repo root, or `pnpm -F next-demo e2e` from anywhere
+```
+
+This brings up its own uniquely-named, non-default-port Postgres container
+(`r3wr-e2e-postgres` on `55499` — separate from the dev container above, so
+both can run at once), applies `packages/web-review/sql/postgres.sql`,
+builds and starts two Next.js servers (overlay enabled and disabled — the
+env var is baked in at build time), runs the suite, and tears the container
+down by name. It's a separate script from `pnpm -F @r3lab/web-review test`,
+which stays fast and hermetic.
 
 ## Notes on the overlay wiring
 
