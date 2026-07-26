@@ -1,0 +1,31 @@
+{
+  "name": "next-demo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Example Next.js App Router app demonstrating @r3lab/web-review wired to a real Postgres database via Drizzle.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:apply": "psql \"$DATABASE_URL\" -f ../../packages/web-review/sql/postgres.sql"
+  },
+  "dependencies": {
+    "@r3lab/web-review": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.2.12",
+    "pg": "^8.22.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}
