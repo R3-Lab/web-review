@@ -1,0 +1,128 @@
+/* Minimal styling for the demo page itself — unrelated to the review
+   overlay's own stylesheet (`@r3lab/web-review/styles.css`, imported
+   separately in layout.tsx). */
+
+:root {
+  color-scheme: light dark;
+  --demo-fg: #1a1a1a;
+  --demo-bg: #ffffff;
+  --demo-muted: #6b7280;
+  --demo-border: #e5e7eb;
+  --demo-accent: #4f46e5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --demo-fg: #f3f4f6;
+    --demo-bg: #0b0b0f;
+    --demo-muted: #9ca3af;
+    --demo-border: #27272a;
+    --demo-accent: #818cf8;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--demo-fg);
+  background: var(--demo-bg);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  line-height: 1.6;
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+.demo-hero h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.demo-hero p {
+  color: var(--demo-muted);
+  font-size: 1.15rem;
+  max-width: 60ch;
+}
+
+.demo-section {
+  margin-top: 3rem;
+}
+
+.demo-section h2 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.demo-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.demo-feature-card {
+  border: 1px solid var(--demo-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.demo-feature-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.demo-feature-card p {
+  margin: 0;
+  color: var(--demo-muted);
+}
+
+.demo-testimonial {
+  border-left: 3px solid var(--demo-accent);
+  padding-left: 1.25rem;
+  font-size: 1.1rem;
+}
+
+.demo-cta {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.demo-button {
+  border-radius: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.demo-button--primary {
+  background: var(--demo-accent);
+  color: white;
+}
+
+.demo-button--secondary {
+  background: transparent;
+  border-color: var(--demo-border);
+  color: var(--demo-fg);
+}
+
+.demo-hero-image {
+  width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+  border: 1px solid var(--demo-border);
+  margin-top: 2rem;
+}

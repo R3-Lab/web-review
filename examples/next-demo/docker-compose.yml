@@ -1,0 +1,27 @@
+name: r3wr-demo
+
+# Postgres for the @r3lab/web-review example app. Runs on a non-default host
+# port (55434) and under uniquely-named service/container/volume so it never
+# collides with any other Postgres container on this machine.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: r3wr-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: r3wr
+      POSTGRES_PASSWORD: r3wr
+      POSTGRES_DB: r3wr_demo
+    ports:
+      - "55434:5432"
+    volumes:
+      - r3wr_demo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U r3wr -d r3wr_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  r3wr_demo_pgdata:
+    name: r3wr_demo_pgdata
