@@ -8,6 +8,7 @@
  * everywhere.
  */
 
+import { normalizeUrl } from "../anchor";
 import type { ReviewAdapter } from "./adapter";
 import { DEFAULT_CATEGORIES } from "./types";
 import type { ReviewCategoryDef } from "./types";
@@ -37,7 +38,7 @@ export interface ReviewConfig {
   localeFromHref?: (href: string) => string | null;
   /**
    * Derive the normalized page key (`ReviewThreadView.urlKey`) that groups
-   * threads by page. No default is available in this package yet — see the
+   * threads by page. Default: this package's own `normalizeUrl` — see the
    * note on `ResolvedReviewConfig.urlKeyFromHref` below.
    */
   urlKeyFromHref?: (href: string) => string;
@@ -79,16 +80,13 @@ export interface ResolvedReviewConfig {
   screenshots: boolean;
   localeFromHref: (href: string) => string | null;
   /**
-   * SEAM: this package's own URL-normalization helper (`normalizeUrl`, a
-   * later work package) is the intended default for this field, but it
-   * doesn't exist yet. Until it lands, `resolveConfig` does NOT invent a
-   * substitute — it passes `config.urlKeyFromHref` through unchanged, which
-   * is why this stays optional here. Callers that need a `urlKey` today
-   * must supply their own `urlKeyFromHref`. Wire the real default in here
-   * once that helper exists; do not add a competing implementation
-   * elsewhere in the meantime.
+   * Defaults to this package's own `normalizeUrl` (`../anchor`): origin and
+   * hash stripped, path kept as-is (including any locale prefix — see the
+   * doc comment on `normalizeUrl` for why), tracking query params (utm_*,
+   * fbclid, …) dropped, remaining params sorted for a stable key. Override
+   * via `ReviewConfig.urlKeyFromHref` for a different grouping.
    */
-  urlKeyFromHref?: (href: string) => string;
+  urlKeyFromHref: (href: string) => string;
   requireUnlock: boolean;
   /**
    * Left optional deliberately: `undefined` means "no override was given",
@@ -108,7 +106,7 @@ export function resolveConfig(config: ReviewConfig): ResolvedReviewConfig {
     storagePrefix: config.storagePrefix ?? "r3wr",
     screenshots: (config.screenshots ?? true) && config.adapter.uploadScreenshot != null,
     localeFromHref: config.localeFromHref ?? (() => null),
-    urlKeyFromHref: config.urlKeyFromHref,
+    urlKeyFromHref: config.urlKeyFromHref ?? normalizeUrl,
     requireUnlock: config.requireUnlock ?? config.adapter.unlock != null,
     enabled: config.enabled,
     debug: config.debug ?? false,
