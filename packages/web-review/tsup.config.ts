@@ -5,6 +5,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "next/index": "src/next/index.ts",
+    "next/client": "src/next/client.ts",
     "server/index": "src/server/index.ts",
     "drizzle/index": "src/drizzle/index.ts",
   },
@@ -18,8 +19,10 @@ export default defineConfig({
   // entry's own directive when multiple entries are code-split together.
   // Disabling splitting keeps every entry self-contained so the directive
   // is guaranteed to stay the first line of the client entries (index,
-  // next/index), while it never appears in the server/drizzle entries
-  // because those source files never contain it.
+  // next/client), while it never appears in the next/index, server, or
+  // drizzle entries — next/index re-exports the server-only route factory
+  // (`./routes.ts`) and must never carry the directive; see the split
+  // rationale documented in `src/next/index.ts`.
   splitting: false,
   external: ["react", "react-dom", "next", "drizzle-orm", "@zumer/snapdom"],
   outDir: "dist",
