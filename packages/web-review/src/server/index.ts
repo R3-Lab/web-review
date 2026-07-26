@@ -1,7 +1,9 @@
 // Node-safe server entry point: zod validators, row-to-wire serializers,
-// HMAC shared-password auth helpers, and the Next.js route-handler
-// factory that takes user-supplied store functions. No React, no Next,
-// no DOM. Implemented in later work packages (WP6-WP7).
+// HMAC shared-password auth helpers, an in-memory unlock rate limiter, and
+// PNG validation. No React, no Next, no DOM globals — this is consumed by
+// Express, Hono, Fastify, and plain Node as much as by Next.js. A later
+// work package (WP7) wraps these primitives in a Next.js route-handler
+// factory; this entry stays framework-agnostic.
 //
 // The wire types and the ReviewAdapter contract (plus ReviewApiError and
 // its helpers) are re-exported here too: server code needs the wire types
@@ -11,5 +13,11 @@
 
 export * from "../core/types";
 export * from "../core/adapter";
+
+export * from "./validation";
+export * from "./serialize";
+export * from "./access";
+export * from "./rate-limit";
+export * from "./png";
 
 export const VERSION = "0.1.0";
