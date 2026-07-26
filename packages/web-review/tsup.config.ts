@@ -1,4 +1,4 @@
-import { copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
@@ -73,6 +73,16 @@ export default defineConfig({
   // source. A single config sidesteps that hazard entirely.
   removeNodeProtocol: false,
   async onSuccess() {
-    copyFileSync("src/styles.css", "dist/styles.css");
+    // `src/styles.css` is the public entry but stays empty on disk; the
+    // overlay's actual rules live in `src/overlay/overlay.css` (see that
+    // file's own header). Concatenated here — rather than left as a CSS
+    // `@import` — so `dist/styles.css` is one self-contained file: an
+    // `@import` would require `dist/overlay.css` to also exist and be
+    // resolvable relative to wherever a consumer's bundler (or CSP)
+    // ultimately serves the stylesheet from, which this plain file-copy
+    // build step has no way to guarantee.
+    const base = readFileSync("src/styles.css", "utf8");
+    const overlay = readFileSync("src/overlay/overlay.css", "utf8");
+    writeFileSync("dist/styles.css", `${base}\n${overlay}\n`);
   },
 });
