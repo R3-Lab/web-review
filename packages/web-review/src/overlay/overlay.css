@@ -1,0 +1,431 @@
+/**
+ * Review overlay — shell styles (mount gate chrome, pins, highlights, drift,
+ * the pin-drop toggle). `r3wr-` prefixed, self-contained, no Tailwind.
+ *
+ * Ported from a working single-app review tool's `feedback-overlay.css`
+ * ("Modern Dark"), generalized: `afb-` → `r3wr-`, `--fb-*` → `--r3wr-*`. The
+ * dark palette is deliberate and distinct from the host site so the tool
+ * never reads as part of the page — nobody should wonder whether a pin is
+ * something they're supposed to be reviewing.
+ *
+ * Rules this file lives by (kept from the reference):
+ *  - EVERY selector is scoped under `.r3wr-root` / `.r3wr-pin-layer`. There
+ *    is not one bare element selector, so nothing here can reach the host
+ *    page. The only exceptions are the `html.r3wr-picking` /
+ *    `body.r3wr-picking` cursor hooks, removed the instant pin-drop mode
+ *    ends.
+ *  - No Tailwind, no host design tokens. Sizes are px (not rem) so a host
+ *    root font-size cannot distort the widget.
+ *  - Category is never encoded by hue alone: every pin carries a category
+ *    glyph (see `icons.tsx`). Status is orthogonal and encoded by FORM
+ *    (filled = open, outlined = resolved), so the two axes never collide.
+ *
+ * WP4a (this file, as shipped) covers: root layout + design tokens, the
+ * pin-drop toggle, the capture scrim/hint, pins + the draft marker,
+ * highlights + the hover-to-select preview, and the screen-reader-only live
+ * region. WP4b ADDS (not yet in this file): the side panel, thread cards,
+ * thread detail, composer/field/button primitives, the category picker, the
+ * spinner, the narrow-screen bottom-sheet layout, and the `afb-pop`/
+ * `afb-slide-in`/`afb-sheet-in` keyframes those surfaces animate with — see
+ * the report for the exact list.
+ */
+
+.r3wr-root,
+.r3wr-pin-layer {
+  /* Ground. Not pure black — keeps the surface reading as a material. */
+  --r3wr-bg: #0f172a;
+  --r3wr-surface: #1e293b;
+  --r3wr-surface-2: #272f42;
+
+  /* Hairline between rows. Decorative separator, exempt from 1.4.11. */
+  --r3wr-border: #475569;
+  /* Anything that BOUNDS a control (inputs, buttons, chips). */
+  --r3wr-border-strong: #64748b;
+
+  --r3wr-fg: #f8fafc;
+  --r3wr-fg-muted: #94a3b8;
+
+  /* Pin-drop mode active state ONLY — never decoration. */
+  --r3wr-accent: #22c55e;
+  --r3wr-accent-fg: #0f172a;
+
+  --r3wr-danger: #f87171;
+  --r3wr-danger-fill: #ef4444;
+
+  /* Category hues. Each clears 4.5:1 as text on BOTH grounds, and each takes
+     the dark ground as its foreground when used as a pin fill. */
+  --r3wr-cat-design: #a78bfa;
+  --r3wr-cat-copy: #60a5fa;
+  --r3wr-cat-bug: #f87171;
+  --r3wr-cat-other: #94a3b8;
+  --r3wr-cat-fg: #0f172a;
+
+  /* A third axis: the resolver could not re-bind this anchor. */
+  --r3wr-drifted: #fbbf24;
+
+  --r3wr-radius: 10px;
+  --r3wr-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --r3wr-focus-ring: 0 0 0 3px rgba(34, 197, 94, 0.45);
+
+  /* Motion: enter ease-out, leave ease-in and faster. */
+  --r3wr-t-in: 200ms cubic-bezier(0, 0, 0.2, 1);
+  --r3wr-t-out: 130ms cubic-bezier(0.4, 0, 1, 1);
+
+  /* Chrome is monospace; a CSS stack only — no webfont, no next/font. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--r3wr-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reviewer-authored prose and quoted copy (WP4b's thread cards / composer)
+   read in a plain system sans, so a comment can never be mistaken for page
+   content. Declared here since it rides on the same root tokens. */
+.r3wr-root .r3wr-prose {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  letter-spacing: 0.005em;
+}
+
+/* Viewport-fixed chrome. Its own stacking context at the top of the range,
+   so it never interleaves with the host site's own z-indexes. */
+.r3wr-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+/* Document-anchored pin layer: a zero-size box at the document origin, so its
+   absolutely-positioned children use DOCUMENT coordinates and stay glued to
+   their target element as the page scrolls. MUST NOT be position:fixed —
+   that would re-base pins to the viewport (the "pins scroll with you" bug). */
+.r3wr-pin-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 2147483600;
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.r3wr-root *,
+.r3wr-root *::before,
+.r3wr-root *::after,
+.r3wr-pin-layer *,
+.r3wr-pin-layer *::before,
+.r3wr-pin-layer *::after {
+  box-sizing: border-box;
+}
+
+.r3wr-root .r3wr-interactive {
+  pointer-events: auto;
+}
+
+/* One focus treatment for every control. 2px ring + halo, always visible. */
+.r3wr-root :focus-visible,
+.r3wr-pin-layer :focus-visible {
+  outline: 2px solid var(--r3wr-accent);
+  outline-offset: 2px;
+  box-shadow: var(--r3wr-focus-ring);
+}
+
+/* Press feedback, shared by every clickable surface. */
+.r3wr-root button:active:not(:disabled),
+.r3wr-pin-layer button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.r3wr-root button,
+.r3wr-pin-layer button {
+  transition:
+    background-color var(--r3wr-t-out),
+    border-color var(--r3wr-t-out),
+    color var(--r3wr-t-out),
+    transform var(--r3wr-t-out);
+}
+
+/* ── Toggle button (pin-drop mode / locked launcher) ─────────────────────── */
+.r3wr-root .r3wr-toggle {
+  position: fixed;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  right: calc(18px + env(safe-area-inset-right));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 999px;
+  background: var(--r3wr-bg);
+  color: var(--r3wr-fg);
+  box-shadow: var(--r3wr-shadow);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: auto;
+  animation: r3wr-rise var(--r3wr-t-in) both;
+}
+.r3wr-root .r3wr-toggle:hover:not(:disabled) {
+  background: var(--r3wr-surface);
+  border-color: var(--r3wr-fg-muted);
+}
+.r3wr-root .r3wr-toggle:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+/* Pin-drop mode is the ONE place the accent appears on the toggle. */
+.r3wr-root .r3wr-toggle[data-active="true"] {
+  background: var(--r3wr-accent);
+  color: var(--r3wr-accent-fg);
+  border-color: var(--r3wr-accent);
+  font-weight: 700;
+}
+.r3wr-root .r3wr-toggle-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--r3wr-surface-2);
+  color: var(--r3wr-fg);
+  font-size: 11px;
+  font-weight: 700;
+}
+.r3wr-root .r3wr-toggle[data-active="true"] .r3wr-toggle-count {
+  background: var(--r3wr-accent-fg);
+  color: var(--r3wr-accent);
+}
+
+/* ── Pin-drop cursor ─────────────────────────────────────────────────────── */
+/* The capture scrim is `pointer-events: none` (clicks AND text selection
+   must reach the page), so it cannot host the cursor. The overlay toggles
+   `r3wr-picking` on <html>/<body> while picking and removes it on exit. */
+html.r3wr-picking,
+html.r3wr-picking body,
+body.r3wr-picking {
+  cursor: crosshair;
+}
+
+/* ── Capture scrim ───────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-capture {
+  position: fixed;
+  inset: 0;
+  /* MUST be none: the capture-phase click handler reads elementFromPoint to
+     anchor the pin to the REAL page element, and drag-selection has to reach
+     the page. With `auto` the scrim would be the topmost hit every time. */
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.16);
+  animation: r3wr-fade var(--r3wr-t-in) both;
+}
+.r3wr-root .r3wr-capture-hint {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(92vw, 640px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--r3wr-accent);
+  border-radius: 999px;
+  background: var(--r3wr-bg);
+  color: var(--r3wr-fg);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: center;
+  box-shadow: var(--r3wr-shadow);
+  pointer-events: none;
+  animation: r3wr-drop var(--r3wr-t-in) both;
+}
+.r3wr-root .r3wr-capture-hint kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 4px;
+  background: var(--r3wr-surface);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── Pins ────────────────────────────────────────────────────────────────── */
+/* Two orthogonal axes, neither of them hue-only:
+     CATEGORY → the glyph inside, plus its hue (--r3wr-cat, set inline)
+     STATUS   → the FORM: filled = open, outlined = resolved
+   A third state, "drifted", adds an amber dashed ring on top of both. */
+.r3wr-pin-layer .r3wr-pin {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  margin-top: -30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--r3wr-cat, var(--r3wr-cat-other));
+  color: var(--r3wr-cat-fg);
+  border: 2px solid var(--r3wr-bg);
+  box-shadow: var(--r3wr-shadow);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: r3wr-pin-in var(--r3wr-t-in) both;
+}
+/* Counter-rotate the glyph so it sits upright in the teardrop. */
+.r3wr-pin-layer .r3wr-pin > svg {
+  transform: rotate(45deg);
+}
+.r3wr-pin-layer .r3wr-pin:active:not(:disabled) {
+  transform: rotate(-45deg) scale(0.97);
+}
+/* Resolved: same hue, opposite form — hollow, so status survives a greyscale
+   print or a colour-blind reader. */
+.r3wr-pin-layer .r3wr-pin[data-status="resolved"] {
+  background: var(--r3wr-bg);
+  color: var(--r3wr-cat, var(--r3wr-cat-other));
+  border-color: var(--r3wr-cat, var(--r3wr-cat-other));
+}
+.r3wr-pin-layer .r3wr-pin[data-drifted="true"] {
+  border-color: var(--r3wr-drifted);
+  border-style: dashed;
+}
+.r3wr-pin-layer .r3wr-pin[data-selected="true"] {
+  outline: 3px solid var(--r3wr-fg);
+  outline-offset: 2px;
+}
+.r3wr-pin-layer .r3wr-pin-draft {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  margin-top: -30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--r3wr-accent);
+  color: var(--r3wr-accent-fg);
+  border: 2px dashed var(--r3wr-bg);
+  box-shadow: var(--r3wr-shadow);
+  animation: r3wr-pin-in var(--r3wr-t-in) both;
+}
+.r3wr-pin-layer .r3wr-pin-draft > svg {
+  transform: rotate(45deg);
+}
+
+/* ── Highlights ──────────────────────────────────────────────────────────── */
+/* Page-anchored boxes in document coords. Purely visual; never block the page. */
+.r3wr-pin-layer .r3wr-highlight {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  --r3wr-hl: var(--r3wr-cat, var(--r3wr-cat-other));
+}
+/* An ELEMENT highlight outlines; it must never fill, or it hides the design. */
+.r3wr-pin-layer .r3wr-highlight[data-kind="element"] {
+  border: 2px solid var(--r3wr-hl);
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.5);
+}
+/* A TEXT highlight is a highlighter swipe over one line box. Real selection
+   rects are one-per-line and narrow, so this stays legible; the degenerate
+   whole-element case is downgraded to an outline by the component. */
+.r3wr-pin-layer .r3wr-highlight[data-kind="text"] {
+  border: none;
+  border-bottom: 2px solid var(--r3wr-hl);
+  background: color-mix(in srgb, var(--r3wr-hl) 22%, transparent);
+}
+.r3wr-pin-layer .r3wr-highlight[data-drifted="true"] {
+  border-color: var(--r3wr-drifted);
+  border-style: dashed;
+}
+.r3wr-pin-layer .r3wr-highlight[data-selected="true"] {
+  outline: 2px solid var(--r3wr-fg);
+  outline-offset: 1px;
+}
+
+/* Hover-to-select preview while picking. Accent, because it belongs to
+   pin-drop mode — it is not a category. */
+.r3wr-pin-layer .r3wr-hover-hl {
+  position: absolute;
+  pointer-events: none;
+  border: 2px dashed var(--r3wr-accent);
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: 2px;
+}
+.r3wr-pin-layer .r3wr-hover-hl[data-kind="text"] {
+  border: none;
+  border-bottom: 2px solid var(--r3wr-accent);
+  background: rgba(34, 197, 94, 0.24);
+}
+
+/* Screen-reader-only text (the live region). */
+.r3wr-root .r3wr-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Keyframes used by the shell ─────────────────────────────────────────── */
+@keyframes r3wr-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes r3wr-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes r3wr-drop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+}
+@keyframes r3wr-pin-in {
+  from {
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.8);
+  }
+}
+
+/* Reduced motion: every transition and animation collapses. Nothing here
+   ever gated input on an animation, so there is nothing to unblock. */
+@media (prefers-reduced-motion: reduce) {
+  .r3wr-root *,
+  .r3wr-root *::before,
+  .r3wr-root *::after,
+  .r3wr-pin-layer *,
+  .r3wr-pin-layer *::before,
+  .r3wr-pin-layer *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .r3wr-root button:active:not(:disabled),
+  .r3wr-pin-layer button:active:not(:disabled) {
+    transform: none;
+  }
+  .r3wr-pin-layer .r3wr-pin:active:not(:disabled) {
+    transform: rotate(-45deg);
+  }
+}
