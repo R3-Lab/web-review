@@ -32,6 +32,16 @@
         "default": "./dist/next/index.cjs"
       }
     },
+    "./next/client": {
+      "import": {
+        "types": "./dist/next/client.d.ts",
+        "default": "./dist/next/client.js"
+      },
+      "require": {
+        "types": "./dist/next/client.d.cts",
+        "default": "./dist/next/client.cjs"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",
