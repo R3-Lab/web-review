@@ -21,11 +21,13 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { OVERLAY_ATTR } from "../anchor";
+import { ReviewApiError } from "../core/adapter";
 import type { ReviewThreadView } from "../core/types";
 
 const { usePathnameMock } = vi.hoisted(() => ({ usePathnameMock: vi.fn(() => "/") }));
@@ -38,13 +40,27 @@ vi.mock("next/navigation", () => ({
   usePathname: usePathnameMock,
 }));
 
-// `OverlayRoot` sits behind `next/dynamic`'s own dynamic `import()`, by
-// design (see `./client.tsx`'s header) — pre-warming it here (same
-// rationale as `../overlay/review-overlay.test.tsx`) keeps its
-// transform/evaluation cold start off the timing of whichever test happens
-// to open the gate first.
+// `DynamicOverlayRoot` is `../overlay/default-surfaces`'s
+// `loadWiredOverlayRoot` behind `next/dynamic`'s own dynamic `import()` — as
+// of this work package, that loader pulls in `./overlay-root` AND, alongside
+// it, `./composer`, `./panel`, and `./unlock-dialog`, so its render props
+// have working defaults out of the box (see `./client.tsx`'s header, and
+// `../overlay/default-surfaces`'s). The FIRST time any test opens the gate,
+// all four imports have to be transformed and evaluated for the first time,
+// which can take longer than a single `findByRole` poll cycle and would make
+// whichever test happens to run first flaky — same rationale, and same fix,
+// as `../overlay/review-overlay.test.tsx`'s own `beforeAll`. Pre-warming
+// them here (still via real dynamic imports, so the "never fetched while
+// off" property is exercised — just not timed against it) means every
+// test's own timing reflects the gate logic, not module-load cold-start
+// cost.
 beforeAll(async () => {
-  await import("../overlay/overlay-root");
+  await Promise.all([
+    import("../overlay/overlay-root"),
+    import("../overlay/composer"),
+    import("../overlay/panel"),
+    import("../overlay/unlock-dialog"),
+  ]);
 });
 
 type ClientModule = typeof import("./client");
@@ -214,6 +230,104 @@ describe("Next ReviewOverlay gate", () => {
     await flush();
 
     await waitFor(() => expect(adapter.listThreads).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * Regression coverage for the defect this work package fixes: `next/client`
+ * used to `import("../overlay/overlay-root").then((m) => m.OverlayRoot)`
+ * directly, bypassing the default `Composer`/`Panel`/`UnlockDialog` wiring
+ * that `../overlay/review-overlay`'s `ReviewOverlay` has always shipped with
+ * (see `../overlay/default-surfaces`'s header). A Next consumer mounting
+ * `@r3lab/web-review/next/client` with only `config` — the documented path —
+ * got pins that dropped with no composer, no panel, no unlock dialog ever
+ * appearing, silently. These tests mount the Next entry the same way and
+ * assert the real WP4b surfaces actually render, the same fake-adapter /
+ * `elementFromPoint` stubbing pattern `../overlay/panels-integration.test.tsx`
+ * uses for the framework-agnostic entry's equivalent coverage.
+ */
+describe("Next ReviewOverlay: default surfaces wired with no render props", () => {
+  it("REGRESSION: renders a working composer (with its category picker) from a pin drop, with only config supplied", async () => {
+    const ReviewOverlay = await importClient(undefined);
+    const adapter = makeAdapter();
+    const user = userEvent.setup();
+
+    const target = document.createElement("div");
+    target.setAttribute("data-testid", "widget");
+    document.body.appendChild(target);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+
+    render(<ReviewOverlay config={{ adapter, enabled: true }} />);
+    await flush();
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    await user.keyboard("c");
+    await user.click(target);
+
+    // The stock `Composer` (WP4b) — its category picker is the clearest
+    // signal it's the real component, not an empty render.
+    expect(await screen.findByRole("radiogroup")).toBeInTheDocument();
+    expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
+  });
+
+  it("renders the stock panel from the Next entry with no render props supplied", async () => {
+    const ReviewOverlay = await importClient(undefined);
+    const adapter = makeAdapter();
+    const user = userEvent.setup();
+
+    render(<ReviewOverlay config={{ adapter, enabled: true }} />);
+    await flush();
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    // Entering pin-drop mode alone (no click yet) already opens the panel.
+    await user.keyboard("c");
+
+    expect(
+      await screen.findByRole("heading", { name: /feedback on this page/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the unlock dialog from the Next entry when the adapter reports a locked session", async () => {
+    const ReviewOverlay = await importClient(undefined);
+    const adapter = makeAdapter();
+    adapter.listThreads.mockRejectedValue(new ReviewApiError(401, "locked"));
+    const user = userEvent.setup();
+
+    render(<ReviewOverlay config={{ adapter, enabled: true }} />);
+    await flush();
+
+    const toggle = await screen.findByRole("button", { name: /locked/i });
+    await user.click(toggle);
+
+    expect(await screen.findByPlaceholderText(/review password/i)).toBeInTheDocument();
+  });
+
+  it("an individually-supplied renderComposer overrides the default while the panel stays stock", async () => {
+    const ReviewOverlay = await importClient(undefined);
+    const adapter = makeAdapter();
+    const user = userEvent.setup();
+
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+
+    render(
+      <ReviewOverlay
+        config={{ adapter, enabled: true }}
+        renderComposer={() => <div data-testid="custom-composer">Custom composer</div>}
+      />,
+    );
+    await flush();
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    await user.keyboard("c");
+    await user.click(target);
+
+    // The override wins over the default composer...
+    expect(await screen.findByTestId("custom-composer")).toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    // ...while the panel, never overridden, is still the stock component.
+    expect(screen.getByRole("heading", { name: /feedback on this page/i })).toBeInTheDocument();
   });
 });
 

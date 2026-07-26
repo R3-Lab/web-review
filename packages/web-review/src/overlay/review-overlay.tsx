@@ -30,17 +30,21 @@
  * `<body>`), so there is nothing to prerender, and `Suspense`'s `null`
  * fallback means there is nothing to show while the chunk loads either.
  *
- * `LazyOverlayRoot` also wires WP4b's four surfaces (`Composer`, `Panel`,
+ * `LazyOverlayRoot` wires WP4b's four surfaces (`Composer`, `Panel`,
  * `UnlockDialog` — `ThreadDetail` is `Panel`'s own internal, not a render
  * prop) in as `OverlayRoot`'s default `renderComposer` / `renderPanel` /
  * `renderUnlockDialog`, so the overlay is complete out of the box: a
  * consumer only has to supply `config`. Each stays overridable — a consumer
- * passing their own `renderComposer` etc. still wins over the default. Their
- * imports live INSIDE this same lazy loader (not as static imports at the
- * top of this file) so they share `OverlayRoot`'s laziness: none of the
- * panel surfaces' code runs, and no consumer bundler fetches their chunk,
- * until the gate actually opens — a static import here would defeat that for
- * every consumer whose own bundler code-splits on this `import()` boundary.
+ * passing their own `renderComposer` etc. still wins over the default. That
+ * wiring lives in `./default-surfaces`'s `loadWiredOverlayRoot`, shared with
+ * `../next/client.tsx`'s own lazy boundary, so this is the only place the
+ * default set is read from rather than a second copy of it — see that
+ * module's header for why. Its surface imports live INSIDE that shared
+ * loader (not as static imports at the top of this file) so they share
+ * `OverlayRoot`'s laziness: none of the panel surfaces' code runs, and no
+ * consumer bundler fetches their chunk, until the gate actually opens — a
+ * static import here would defeat that for every consumer whose own bundler
+ * code-splits on this `import()` boundary.
  */
 
 import type { ReactNode } from "react";
@@ -48,9 +52,9 @@ import { lazy, Suspense, useCallback, useMemo, useSyncExternalStore } from "reac
 
 import { resolveConfig } from "../core/config";
 import type { ReviewConfig } from "../core/config";
+import { loadWiredOverlayRoot } from "./default-surfaces";
 import type {
   ComposerRenderProps,
-  OverlayRootProps,
   PanelRenderProps,
   UnlockRenderProps,
 } from "./overlay-root";
@@ -58,27 +62,7 @@ import type {
 /** Same default as `resolveConfig` — used before a config is resolved, to read the escape hatch. */
 const DEFAULT_STORAGE_PREFIX = "r3wr";
 
-const LazyOverlayRoot = lazy(async () => {
-  const [{ OverlayRoot }, { Composer }, { Panel }, { UnlockDialog }] = await Promise.all([
-    import("./overlay-root"),
-    import("./composer"),
-    import("./panel"),
-    import("./unlock-dialog"),
-  ]);
-
-  function WiredOverlayRoot(props: OverlayRootProps) {
-    return (
-      <OverlayRoot
-        {...props}
-        renderComposer={props.renderComposer ?? ((p) => <Composer {...p} />)}
-        renderPanel={props.renderPanel ?? ((p) => <Panel {...p} />)}
-        renderUnlockDialog={props.renderUnlockDialog ?? ((p) => <UnlockDialog {...p} />)}
-      />
-    );
-  }
-
-  return { default: WiredOverlayRoot };
-});
+const LazyOverlayRoot = lazy(loadWiredOverlayRoot);
 
 export interface ReviewOverlayProps {
   config: ReviewConfig;

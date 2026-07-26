@@ -89,20 +89,30 @@ deployment would implement `putScreenshot` against R2/S3/etc.
 
 ## Notes on the overlay wiring
 
-`@r3lab/web-review/next/client`'s `ReviewOverlay` does **not** automatically
-wire up default `Composer`/`Panel`/`UnlockDialog` implementations — unlike
-the framework-agnostic `ReviewOverlay` exported from the package's main
-entry, which wires those three in as defaults so a plain-React consumer only
-has to supply `config`. `app/review-mount.tsx` supplies them explicitly:
+`@r3lab/web-review/next/client`'s `ReviewOverlay` wires up default
+`Composer`/`Panel`/`UnlockDialog` implementations the same way the
+framework-agnostic `ReviewOverlay` exported from the package's main entry
+does, so `config` is the only prop a consumer has to supply.
+`app/review-mount.tsx` demonstrates the clean path:
 
 ```tsx
-import { Composer, Panel, UnlockDialog, createHttpAdapter } from "@r3lab/web-review";
+import { createHttpAdapter } from "@r3lab/web-review";
 import { ReviewOverlay } from "@r3lab/web-review/next/client";
+
+<ReviewOverlay config={{ adapter: createHttpAdapter() }} />;
+```
+
+Each surface stays individually overridable — pass `renderComposer` (or
+`renderPanel` / `renderUnlockDialog`) to replace just that one surface with
+your own component while the others stay stock:
+
+```tsx
+import { createHttpAdapter } from "@r3lab/web-review";
+import { ReviewOverlay } from "@r3lab/web-review/next/client";
+import { MyBrandedComposer } from "./my-branded-composer";
 
 <ReviewOverlay
   config={{ adapter: createHttpAdapter() }}
-  renderComposer={(props) => <Composer {...props} />}
-  renderPanel={(props) => <Panel {...props} />}
-  renderUnlockDialog={(props) => <UnlockDialog {...props} />}
+  renderComposer={(props) => <MyBrandedComposer {...props} />}
 />;
 ```
