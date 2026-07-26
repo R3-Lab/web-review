@@ -5,7 +5,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "next/index": "src/next/index.ts",
-    "next/client": "src/next/client.ts",
+    "next/client": "src/next/client.tsx",
     "server/index": "src/server/index.ts",
     "drizzle/index": "src/drizzle/index.ts",
   },
