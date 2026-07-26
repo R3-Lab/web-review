@@ -15,6 +15,7 @@ thread UI, and the wire contract between the two.
 - [Install](#install)
 - [Quickstart: Next.js](#quickstart-nextjs)
 - [Quickstart: plain React](#quickstart-plain-react)
+- [Customizing a surface](#customizing-a-surface)
 - [Bring your own storage](#bring-your-own-storage)
 - [REST API](#rest-api)
 - [Database schema](#database-schema)
@@ -260,6 +261,41 @@ export function App() {
   );
 }
 ```
+
+## Customizing a surface
+
+`ReviewOverlay` is the only mount point this package exports as a value.
+`OverlayRoot` (its internal shell) is exported as **types only**
+(`OverlayRootProps`, `ComposerRenderProps`, `PanelRenderProps`,
+`UnlockRenderProps`, `ShotState`) — `import { OverlayRoot }` will not
+compile, deliberately: `ReviewOverlay` owns the mount gate and the lazy-load
+boundary (see [Bundle cost](#bundle-cost)), and there's no supported way to
+render the shell outside of it.
+
+The four default UI surfaces — `Composer`, `Panel`, `ThreadDetail`,
+`UnlockDialog` — **are** exported as values, so you can replace just one and
+keep the rest stock via `renderComposer`/`renderPanel`/`renderUnlockDialog`:
+
+```tsx
+import { createHttpAdapter, ReviewOverlay } from "@r3lab/web-review";
+import { MyBrandedComposer } from "./my-branded-composer";
+
+<ReviewOverlay
+  config={{ adapter: createHttpAdapter() }}
+  renderComposer={(props) => <MyBrandedComposer {...props} />}
+/>;
+```
+
+`props` is typed `ComposerRenderProps` (or `PanelRenderProps` /
+`UnlockRenderProps` for the other two) — import the type to build a
+component against the exact contract `OverlayRoot` calls it with. A
+replaced surface receives the **same** props `OverlayRoot` passes the stock
+one — the same `onSubmit`/`onCancel` for the composer, `onReply`/
+`onToggleStatus`/`onSelect`/`onClose` for the panel, `onUnlocked`/`onClose`
+for the unlock dialog. A custom surface has to call those to actually drive
+the overlay's state machine; skip them and you get a form that looks right
+and does nothing — creating a thread, replying, or resolving only happens
+because the render prop was invoked, not because the surface merely rendered.
 
 ## Bring your own storage
 
