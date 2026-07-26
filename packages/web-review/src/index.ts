@@ -8,5 +8,6 @@
 export * from "./core/types";
 export * from "./core/adapter";
 export * from "./core/config";
+export * from "./anchor";
 
 export const VERSION = "0.1.0";

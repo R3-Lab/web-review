@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeUrl } from "../anchor";
 import {
   ReviewApiError,
   isFeatureDisabled,
@@ -90,7 +91,12 @@ describe("resolveConfig", () => {
     // describe block below for the full truth table.
     expect(resolved.screenshots).toBe(false);
     expect(resolved.localeFromHref("https://example.com/")).toBeNull();
-    expect(resolved.urlKeyFromHref).toBeUndefined();
+    // Default is this package's own `normalizeUrl` — see the seam note on
+    // `ResolvedReviewConfig.urlKeyFromHref` in ./config.
+    expect(resolved.urlKeyFromHref).toBe(normalizeUrl);
+    expect(resolved.urlKeyFromHref("https://example.com/tr/flyer?utm_source=x")).toBe(
+      "/tr/flyer",
+    );
     expect(resolved.requireUnlock).toBe(false);
     expect(resolved.enabled).toBeUndefined();
     expect(resolved.debug).toBe(false);
