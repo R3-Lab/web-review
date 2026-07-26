@@ -160,18 +160,25 @@ export function isLocked(err: unknown): boolean {
 
 /**
  * True when the adapter says the review feature is switched off
- * server-side (404 with code `not_found`) — there is nothing to unlock, so
- * the overlay should render nothing at all rather than offer a prompt that
- * can never succeed.
+ * server-side (404 with code `feature_disabled`) — there is nothing to
+ * unlock, so the overlay should render nothing at all rather than offer a
+ * prompt that can never succeed.
  *
- * Both conditions matter: a plain 404 (e.g. an unknown thread id) is NOT a
- * disabled feature, only a 404 carrying this specific code is.
+ * `@r3lab/web-review/next`'s route factory hands out three distinguishable
+ * 404 codes (see `src/next/routes.ts`): `feature_disabled` for the kill
+ * switch, `not_found` for a missing or malformed thread id, and
+ * `screenshots_unsupported` when the store never implemented
+ * `putScreenshot`. Only the first means the feature itself is off — a plain
+ * `not_found` (e.g. an unknown thread id) is NOT a disabled feature, and
+ * this function must not confuse the two: a custom `ReviewAdapter` calling
+ * `getThread(badId)` and checking `isFeatureDisabled` on the result must get
+ * `false`, or it would wrongly tear down an otherwise-working overlay.
  */
 export function isFeatureDisabled(err: unknown): boolean {
   return (
     err instanceof ReviewApiError &&
     err.status === 404 &&
-    err.code === "not_found"
+    err.code === "feature_disabled"
   );
 }
 

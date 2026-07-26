@@ -671,7 +671,7 @@ export function OverlayRoot({
   // mounts client-side (see `./review-overlay.tsx`) — but `createPortal`
   // would throw rather than degrade if that ever stopped being true.
   // `gate === "disabled"` means the adapter reported the feature switched
-  // off server-side (404 `not_found`): there is nothing to unlock and no
+  // off server-side (404 `feature_disabled`): there is nothing to unlock and no
   // honest prompt to show, so the overlay disappears entirely.
   if (typeof document === "undefined" || gate === "disabled") return null;
 

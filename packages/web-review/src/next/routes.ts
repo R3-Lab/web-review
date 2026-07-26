@@ -273,8 +273,9 @@ export interface ReviewStore {
    * `screenshotKey` at an arbitrary object in the consumer's bucket.
    *
    * Optional. Omit entirely to disable the screenshot endpoint: the route
-   * handler checks for this method's presence and answers 404 rather than
-   * calling it when absent — it never crashes on a missing implementation.
+   * handler checks for this method's presence and answers 404
+   * `screenshots_unsupported` rather than calling it when absent — it never
+   * crashes on a missing implementation.
    */
   putScreenshot?(bytes: Uint8Array, contentType: string): Promise<string>;
 
@@ -302,8 +303,8 @@ export interface CreateReviewRouteHandlersOptions {
    * The shared-password gate. Both `password` and `secret` must be
    * non-empty for the feature to turn on — see `getAccessConfig` in
    * `../server/access`. Leaving either unset takes every route in this
-   * factory's output to 404, including for a caller `isAdmin` would
-   * otherwise admit. There is deliberately no open fallback.
+   * factory's output to 404 `feature_disabled`, including for a caller
+   * `isAdmin` would otherwise admit. There is deliberately no open fallback.
    */
   access: {
     /** The shared reviewer password. Unset/empty ⇒ feature off. */
@@ -390,8 +391,34 @@ function json(
   return new Response(JSON.stringify(body), { status: init.status ?? 200, headers });
 }
 
+/**
+ * 404 for a missing/malformed thread id — the resource genuinely doesn't
+ * exist. Distinct from {@link featureDisabled} and
+ * {@link screenshotsUnsupported}: this code means "keep looking with a
+ * different id," not "there is nothing here at all."
+ */
 function notFound(): Response {
   return json({ error: "not_found" }, { status: 404 });
+}
+
+/**
+ * 404 for the kill switch being off (no password/secret configured — see
+ * `getAccessConfig` in `../server/access`). Every route answers this, even
+ * for a caller `isAdmin` would otherwise admit; see `requireAccess` and the
+ * `unlock` handler, its only two call sites. This is the ONLY code
+ * `isFeatureDisabled` (`../core/adapter`) recognizes.
+ */
+function featureDisabled(): Response {
+  return json({ error: "feature_disabled" }, { status: 404 });
+}
+
+/**
+ * 404 for `POST /screenshot` when the store never implemented
+ * `putScreenshot` — screenshot uploads are simply unsupported by this
+ * consumer, which is not the same thing as the whole feature being off.
+ */
+function screenshotsUnsupported(): Response {
+  return json({ error: "screenshots_unsupported" }, { status: 404 });
 }
 
 /** Parse a cookie value out of a `Request`'s `Cookie` header — the Web
@@ -448,16 +475,16 @@ export function createReviewRouteHandlers(
 
   /**
    * The gate every route except `/unlock` runs first. Feature disabled
-   * (kill switch off) ⇒ 404, even for a caller `isAdmin` would otherwise
-   * admit — there is deliberately no open fallback. Otherwise: a valid
-   * signed cookie, or a successful `isAdmin` check, admits; anything else
-   * is a 401 `locked`.
+   * (kill switch off) ⇒ 404 `feature_disabled`, even for a caller `isAdmin`
+   * would otherwise admit — there is deliberately no open fallback.
+   * Otherwise: a valid signed cookie, or a successful `isAdmin` check,
+   * admits; anything else is a 401 `locked`.
    */
   async function requireAccess(
     req: Request,
   ): Promise<{ ok: true; isAdmin: boolean } | { ok: false; response: Response }> {
     const config = accessConfig();
-    if (!config) return { ok: false, response: notFound() };
+    if (!config) return { ok: false, response: featureDisabled() };
 
     const cookie = readCookie(req, cookieName);
     const verdict = await resolveAccess(cookie, config, options.isAdmin);
@@ -467,7 +494,7 @@ export function createReviewRouteHandlers(
 
   const unlock: ReviewRouteHandler = async (req) => {
     const config = accessConfig();
-    if (!config) return notFound();
+    if (!config) return featureDisabled();
 
     const ip = clientIp((name) => req.headers.get(name));
     const attempt = limiter.consumeUnlockAttempt(ip);
@@ -645,7 +672,7 @@ export function createReviewRouteHandlers(
 
     // Omitting `putScreenshot` cleanly disables the endpoint rather than
     // crashing when it's eventually called.
-    if (!store.putScreenshot) return notFound();
+    if (!store.putScreenshot) return screenshotsUnsupported();
 
     let form: FormData;
     try {

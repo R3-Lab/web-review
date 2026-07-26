@@ -121,18 +121,17 @@ export default defineConfig([
     // client entry and a server-only one — the three server entries below
     // keep their original single-bundle-per-entry shape untouched.
     //
-    // NOTE for src/index.ts: `export * from "./overlay/overlay-root"`
-    // there re-exports `OverlayRoot` as a live, statically-bound named
-    // export of the package root, which means dist/index.js (unlike
-    // dist/next/client.js, which only re-exports types from that module)
-    // still contains a top-level, EAGER `import` of the same chunk this
-    // `import()` lazily targets — so whether OverlayRoot's ~35 KB is
-    // actually deferred at runtime for a consumer of the plain `index`
-    // entry depends on their own bundler tree-shaking the unused
-    // `OverlayRoot` export away, not on this file alone. See the WP15
-    // report for the full analysis; this file can only guarantee the
-    // `import()` boundary is real, not that every possible re-export path
-    // to the same module is absent.
+    // NOTE for src/index.ts: as of WP17 it re-exports from
+    // "./overlay/overlay-root" with `export type { ... }` only — the same
+    // type-only shape dist/next/client.js already used — so dist/index.js
+    // carries no top-level, EAGER `import` of that chunk at all; a type-only
+    // export erases entirely at compile time and leaves nothing for a
+    // bundler to eagerly pull in. `OverlayRoot` itself reaches the module
+    // only through the `import()` this splitting config targets (via
+    // `React.lazy` in src/overlay/review-overlay.tsx), so the chunk is
+    // genuinely deferred for every consumer of the plain `index` entry,
+    // regardless of their own bundler's tree-shaking. See the WP15 report
+    // for the pre-WP17 analysis this superseded.
     //
     // `splitting` is deliberately NOT set here as a boolean — leaving it
     // `undefined` is load-bearing, not an oversight. esbuild's own code

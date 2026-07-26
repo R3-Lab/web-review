@@ -6,6 +6,7 @@
 // Node's native, spec-compliant `Request`/`Response`/`FormData`/`File`
 // instead of the package-wide jsdom default (see `vitest.config.ts`).
 import { describe, expect, it } from "vitest";
+import { ReviewApiError, isFeatureDisabled } from "../core/adapter";
 import type { NewCommentInput, ReviewCommentView, ReviewStatus, ReviewThreadView } from "../core/types";
 import { type AccessConfig, serializeAccessCookie } from "../server/access";
 import type { ReviewCommentRow, ReviewThreadRow } from "../server/serialize";
@@ -250,7 +251,11 @@ describe("feature disabled (no password configured)", () => {
     const responses = await Promise.all(cases);
     for (const res of responses) {
       expect(res.status).toBe(404);
-      expect((await readJson<ErrorBody>(res)).error).toBe("not_found");
+      // The kill switch is coded `feature_disabled`, never the generic
+      // `not_found` a missing thread gets — see the "404 code
+      // discrimination" describe block below for why that distinction
+      // matters to `isFeatureDisabled`.
+      expect((await readJson<ErrorBody>(res)).error).toBe("feature_disabled");
     }
   });
 
@@ -526,12 +531,13 @@ describe("GET /threads/:id", () => {
     expect(res.status).toBe(404);
   });
 
-  it("unknown (but well-formed) id ⇒ 404", async () => {
+  it("unknown (but well-formed) id ⇒ 404 not_found (never feature_disabled)", async () => {
     const handlers = buildHandlers();
     const cookie = cookieHeaderFor(ACCESS);
     const missing = fakeUuid();
     const res = await handlers.thread.GET(makeRequest("GET", `/threads/${missing}`, { cookie }), ctx(missing));
     expect(res.status).toBe(404);
+    expect((await readJson<ErrorBody>(res)).error).toBe("not_found");
   });
 });
 
@@ -751,13 +757,81 @@ describe("POST /screenshot", () => {
     expect((await readJson<ErrorBody>(res)).error).toBe("no_file");
   });
 
-  it("store without putScreenshot ⇒ 404", async () => {
+  it("store without putScreenshot ⇒ 404 screenshots_unsupported", async () => {
     const handlers = buildHandlers({ store: createFakeStore({ withScreenshot: false }) });
     const cookie = cookieHeaderFor(ACCESS);
     const res = await handlers.screenshot.POST(
       makeRequest("POST", "/screenshot", { formData: pngForm(makePngBytes(300, 300)), cookie }),
     );
     expect(res.status).toBe(404);
-    expect((await readJson<ErrorBody>(res)).error).toBe("not_found");
+    expect((await readJson<ErrorBody>(res)).error).toBe("screenshots_unsupported");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 404 code discrimination — the WP19 defect
+// ---------------------------------------------------------------------------
+//
+// Three semantically different conditions all answer 404 through this
+// factory: the kill switch being off, a thread id that doesn't resolve, and
+// a store with no `putScreenshot`. Before this fix every one of them carried
+// the identical body `{ error: "not_found" }`, which made
+// `isFeatureDisabled` (`../core/adapter`) indistinguishable from a generic
+// "no such thread" 404 — see that function's doc comment. These tests pin
+// the three codes apart and prove `isFeatureDisabled` reacts only to the
+// kill-switch one, using the REAL response bodies this factory produces
+// (not hand-constructed `ReviewApiError`s), so a future change that
+// collapses the codes back together fails here first.
+describe("404 code discrimination (WP19)", () => {
+  it("the kill switch, an unknown thread, and unsupported screenshots each carry a distinct code", async () => {
+    const disabledHandlers = buildHandlers({ access: { password: undefined, secret: undefined } });
+    const disabledRes = await disabledHandlers.threads.GET(makeRequest("GET", "/threads?urlKey=/"));
+
+    const enabledHandlers = buildHandlers({ store: createFakeStore({ withScreenshot: false }) });
+    const cookie = cookieHeaderFor(ACCESS);
+    const missing = fakeUuid();
+    const missingThreadRes = await enabledHandlers.thread.GET(
+      makeRequest("GET", `/threads/${missing}`, { cookie }),
+      ctx(missing),
+    );
+    const screenshotRes = await enabledHandlers.screenshot.POST(
+      makeRequest("POST", "/screenshot", { formData: pngForm(makePngBytes(300, 300)), cookie }),
+    );
+
+    const [disabledCode, missingThreadCode, screenshotCode] = await Promise.all(
+      [disabledRes, missingThreadRes, screenshotRes].map(async (res) => {
+        expect(res.status).toBe(404);
+        return (await readJson<ErrorBody>(res)).error;
+      }),
+    );
+
+    expect(disabledCode).toBe("feature_disabled");
+    expect(missingThreadCode).toBe("not_found");
+    expect(screenshotCode).toBe("screenshots_unsupported");
+    expect(new Set([disabledCode, missingThreadCode, screenshotCode]).size).toBe(3);
+  });
+
+  // REGRESSION TEST for the WP19 defect: before the fix, every 404 above
+  // carried code `not_found`, which is exactly the code `isFeatureDisabled`
+  // used to check for — so it returned `true` for an unknown-thread 404 too.
+  // Verified by hand against pre-fix `src/next/routes.ts` /
+  // `src/core/adapter.ts`: this second assertion (`false`) failed there.
+  it("isFeatureDisabled is true for the kill-switch 404 and false for an unknown-thread 404", async () => {
+    const disabledHandlers = buildHandlers({ access: { password: undefined, secret: undefined } });
+    const disabledRes = await disabledHandlers.threads.GET(makeRequest("GET", "/threads?urlKey=/"));
+    const disabledBody = await readJson<ErrorBody>(disabledRes);
+    const disabledErr = new ReviewApiError(disabledRes.status, "disabled", disabledBody.error);
+    expect(isFeatureDisabled(disabledErr)).toBe(true);
+
+    const enabledHandlers = buildHandlers();
+    const cookie = cookieHeaderFor(ACCESS);
+    const missing = fakeUuid();
+    const missingRes = await enabledHandlers.thread.GET(
+      makeRequest("GET", `/threads/${missing}`, { cookie }),
+      ctx(missing),
+    );
+    const missingBody = await readJson<ErrorBody>(missingRes);
+    const missingErr = new ReviewApiError(missingRes.status, "missing", missingBody.error);
+    expect(isFeatureDisabled(missingErr)).toBe(false);
   });
 });

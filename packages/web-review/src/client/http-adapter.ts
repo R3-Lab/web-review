@@ -25,12 +25,15 @@
  * throws {@link ReviewApiError} (from `../core/adapter`) carrying the HTTP
  * status, the parsed `error` code from the JSON body (when present), and a
  * parsed `Retry-After` header (when present and a positive number). The
- * 401-`locked` / 404-`not_found` / 429 distinction this produces is what
- * drives real overlay behaviour — see `isLocked`, `isFeatureDisabled`,
- * `unlockErrorMessage` in `../core/adapter`. In particular a 404 carrying
- * code `not_found` means the review feature is switched off server-side, so
- * the overlay hides entirely rather than offering a password prompt that
- * can never succeed.
+ * 401-`locked` / 404-`feature_disabled` / 404-`not_found` / 429 distinction
+ * this produces is what drives real overlay behaviour — see `isLocked`,
+ * `isFeatureDisabled`, `unlockErrorMessage` in `../core/adapter`. In
+ * particular a 404 carrying code `feature_disabled` means the review
+ * feature is switched off server-side, so the overlay hides entirely rather
+ * than offering a password prompt that can never succeed — a 404 carrying
+ * `not_found` (an unknown thread id) or `screenshots_unsupported` (no
+ * `putScreenshot` on the store) is a different, unrelated condition and
+ * must NOT trip `isFeatureDisabled`.
  *
  * `uploadScreenshot` is the one method that deliberately does NOT rethrow:
  * per the `ReviewAdapter.uploadScreenshot` contract, a storage failure
