@@ -10,7 +10,8 @@
     "test": "pnpm -F @r3lab/web-review test",
     "typecheck": "pnpm -F @r3lab/web-review typecheck",
     "lint": "pnpm -F @r3lab/web-review lint",
-    "dev": "pnpm -F @r3lab/web-review dev"
+    "dev": "pnpm -F @r3lab/web-review dev",
+    "e2e": "pnpm -F next-demo e2e"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
