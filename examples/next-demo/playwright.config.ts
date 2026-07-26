@@ -5,17 +5,25 @@ import { DATABASE_URL, DISABLED_PORT, ENABLED_PORT, REVIEW_PASSWORD, REVIEW_SECR
  * E2E config (WP11) — deliberately separate from the package's own
  * `vitest.config.ts`, never run by `pnpm -F @r3lab/web-review test`.
  * `scripts/e2e.sh` (via `pnpm e2e`) brings up a real, uniquely-named
- * Postgres container and applies the package's own `sql/postgres.sql`
- * before invoking `playwright test`; this file owns building and starting
- * TWO real Next.js servers against that database — one with the overlay
- * enabled, one without (scenario 8) — since `NEXT_PUBLIC_REVIEW_ENABLED` is
- * baked in at build time and can't be toggled per-request.
+ * Postgres container, applies the package's own `sql/postgres.sql`, and —
+ * load-bearing — builds BOTH Next.js variants (overlay enabled and
+ * disabled; `NEXT_PUBLIC_REVIEW_ENABLED` is baked in at build time)
+ * SEQUENTIALLY, before ever invoking `playwright test`.
+ *
+ * The `webServer` entries below therefore do ONLY `next start` against an
+ * already-built `distDir`, nothing else. They used to also run
+ * `next build`, but Playwright starts every `webServer` array entry
+ * CONCURRENTLY — two `next build` invocations racing over the same project
+ * directory's shared caches (Turbopack cache, `node_modules/.cache`) is a
+ * real, reproducible failure: one build can lose the race and leave
+ * `next start` with nothing to serve, or worse, corrupt output that mixes
+ * both variants. Build ordering must live in `scripts/e2e.sh`, not here.
  */
 
 const sharedServerEnv = { DATABASE_URL, REVIEW_PASSWORD, REVIEW_SECRET };
 
-/** Long: each webServer entry is a real `next build` (Turbopack) + `next start`, not just a boot. */
-const WEB_SERVER_TIMEOUT_MS = 180_000;
+/** Generous for booting an ALREADY-BUILT `next start` (normally well under a second) — not a build timeout, `scripts/e2e.sh` owns that. */
+const WEB_SERVER_TIMEOUT_MS = 30_000;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -82,23 +90,25 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "pnpm run e2e:build:enabled && pnpm run e2e:start:enabled",
+      // NOT `e2e:build:enabled && e2e:start:enabled` — see the file header.
+      // scripts/e2e.sh already built .next-e2e-enabled before this ever runs.
+      command: "pnpm run e2e:start:enabled",
       url: `http://localhost:${ENABLED_PORT}`,
       timeout: WEB_SERVER_TIMEOUT_MS,
       reuseExistingServer: false,
-      env: { ...sharedServerEnv, NEXT_PUBLIC_REVIEW_ENABLED: "1" },
+      // NEXT_PUBLIC_REVIEW_ENABLED is irrelevant here (already baked into
+      // the build by scripts/e2e.sh) — DATABASE_URL/REVIEW_PASSWORD/
+      // REVIEW_SECRET are what the running server actually needs.
+      env: sharedServerEnv,
       stdout: "pipe",
       stderr: "pipe",
     },
     {
-      command: "pnpm run e2e:build:disabled && pnpm run e2e:start:disabled",
+      command: "pnpm run e2e:start:disabled",
       url: `http://localhost:${DISABLED_PORT}`,
       timeout: WEB_SERVER_TIMEOUT_MS,
       reuseExistingServer: false,
-      // Explicitly empty, not merely absent: the point is to prove the
-      // build-time literal folds to `false`, not to rely on an unset var
-      // possibly leaking in from the shell.
-      env: { ...sharedServerEnv, NEXT_PUBLIC_REVIEW_ENABLED: "" },
+      env: sharedServerEnv,
       stdout: "pipe",
       stderr: "pipe",
     },
