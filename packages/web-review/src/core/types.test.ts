@@ -82,7 +82,10 @@ describe("resolveConfig", () => {
     expect(resolved.project).toBe("web");
     expect(resolved.categories).toBe(DEFAULT_CATEGORIES);
     expect(resolved.storagePrefix).toBe("r3wr");
-    expect(resolved.screenshots).toBe(true);
+    // This adapter has no `uploadScreenshot`, so even the `screenshots`
+    // default of `true` resolves down to `false` — see the `screenshots`
+    // describe block below for the full truth table.
+    expect(resolved.screenshots).toBe(false);
     expect(resolved.localeFromHref("https://example.com/")).toBeNull();
     expect(resolved.urlKeyFromHref).toBeUndefined();
     expect(resolved.requireUnlock).toBe(false);
@@ -133,14 +136,35 @@ describe("resolveConfig", () => {
     expect(resolveConfig({ adapter }).requireUnlock).toBe(false);
   });
 
-  it("leaves screenshots at its default when adapter has no uploadScreenshot", () => {
-    // resolveConfig does not couple `screenshots` to `uploadScreenshot`'s
-    // presence — that inertness is enforced by whoever calls the adapter
-    // at capture time, not by config resolution. The default therefore
-    // stays `true` even though this adapter can't actually upload anything.
-    const adapter = makeAdapter();
-    expect(adapter.uploadScreenshot).toBeUndefined();
-    expect(resolveConfig({ adapter }).screenshots).toBe(true);
+  describe("screenshots", () => {
+    // `screenshots` must resolve `true` only when screenshots are both
+    // wanted (`config.screenshots` unset or `true`) and possible
+    // (`adapter.uploadScreenshot` implemented). An explicit `false` always
+    // wins, even when the adapter could upload.
+    it("resolves false when unset and the adapter has no uploadScreenshot", () => {
+      const adapter = makeAdapter();
+      expect(adapter.uploadScreenshot).toBeUndefined();
+      expect(resolveConfig({ adapter }).screenshots).toBe(false);
+    });
+
+    it("resolves true when unset and the adapter has uploadScreenshot", () => {
+      const adapter = makeAdapter({ uploadScreenshot: async () => null });
+      expect(resolveConfig({ adapter }).screenshots).toBe(true);
+    });
+
+    it("resolves false when explicitly true but the adapter has no uploadScreenshot", () => {
+      const adapter = makeAdapter();
+      expect(
+        resolveConfig({ adapter, screenshots: true }).screenshots,
+      ).toBe(false);
+    });
+
+    it("resolves false when explicitly false even though the adapter has uploadScreenshot", () => {
+      const adapter = makeAdapter({ uploadScreenshot: async () => null });
+      expect(
+        resolveConfig({ adapter, screenshots: false }).screenshots,
+      ).toBe(false);
+    });
   });
 });
 

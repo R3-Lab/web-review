@@ -23,9 +23,11 @@ export interface ReviewConfig {
   storagePrefix?: string;
   /**
    * Whether to attempt screenshot capture on new threads. Default `true`,
-   * but inert unless `adapter.uploadScreenshot` is implemented: with no
-   * upload method there is nowhere to send the capture, so it is skipped
-   * regardless of this flag.
+   * but `resolveConfig` resolves this down to `false` whenever
+   * `adapter.uploadScreenshot` is absent — with no upload method there is
+   * nowhere to send the capture. See `ResolvedReviewConfig.screenshots`.
+   * An explicit `false` here always wins, regardless of what the adapter
+   * supports.
    */
   screenshots?: boolean;
   /**
@@ -68,6 +70,12 @@ export interface ResolvedReviewConfig {
   project: string;
   categories: ReviewCategoryDef[];
   storagePrefix: string;
+  /**
+   * `true` only when screenshots are both wanted (`ReviewConfig.screenshots`
+   * is `true` or unset) and possible (`adapter.uploadScreenshot` is
+   * implemented). An explicit `ReviewConfig.screenshots: false` always
+   * resolves to `false` here, even when the adapter can upload.
+   */
   screenshots: boolean;
   localeFromHref: (href: string) => string | null;
   /**
@@ -98,7 +106,7 @@ export function resolveConfig(config: ReviewConfig): ResolvedReviewConfig {
     project: config.project ?? "web",
     categories: config.categories ?? DEFAULT_CATEGORIES,
     storagePrefix: config.storagePrefix ?? "r3wr",
-    screenshots: config.screenshots ?? true,
+    screenshots: (config.screenshots ?? true) && config.adapter.uploadScreenshot != null,
     localeFromHref: config.localeFromHref ?? (() => null),
     urlKeyFromHref: config.urlKeyFromHref,
     requireUnlock: config.requireUnlock ?? config.adapter.unlock != null,
