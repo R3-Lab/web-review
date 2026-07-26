@@ -25,6 +25,23 @@ import { z } from "zod";
 /** Comment bodies are generous but bounded — 10k characters. */
 export const MAX_COMMENT_BODY = 10_000;
 
+/**
+ * The package-wide bound for `urlKey`: the tightest limit across supported
+ * backends. `sql/mysql.sql`'s `url_key varchar(512)` is that limit —
+ * `url_key` takes part in the composite index `review_thread_page_idx
+ * (project, url_key, status)`, and MySQL's indexable-byte budget caps it
+ * there (see the derivation in that file's `url_key` comment). Postgres's
+ * `url_key text` column could store more, but a key that validates and
+ * inserts on one supported database while failing on another is worse than
+ * a slightly tighter limit enforced everywhere, so this is the bound both
+ * `newThreadSchema` and `listThreadsQuerySchema` validate against.
+ *
+ * `src/server/schema-limits.test.ts` parses `sql/mysql.sql` and asserts this
+ * constant tracks the column's actual declared width, so the two cannot
+ * silently drift apart again.
+ */
+export const MAX_URL_KEY = 512;
+
 const jsonObject = z.custom<Record<string, unknown>>(
   (v) => typeof v === "object" && v !== null && !Array.isArray(v),
   { message: "expected a JSON object" },
@@ -71,7 +88,7 @@ export const unlockSchema = z.object({
 export const newThreadSchema = z.object({
   project: z.string().min(1).max(64).optional(),
   url: trimmedNonEmpty(2048),
-  urlKey: trimmedNonEmpty(1024),
+  urlKey: trimmedNonEmpty(MAX_URL_KEY),
   locale: localeSchema.nullable(),
   route: z.string().max(512).nullish(),
   title: z.string().max(200).nullish(),
@@ -97,7 +114,7 @@ export const patchThreadSchema = z.object({
 
 /** Query string for a `GET /threads`-style list route. */
 export const listThreadsQuerySchema = z.object({
-  urlKey: z.string().min(1).max(1024).optional(),
+  urlKey: z.string().min(1).max(MAX_URL_KEY).optional(),
   project: z.string().min(1).max(64).optional(),
   status: z.enum(["open", "resolved", "all"]).default("all"),
   limit: z.coerce.number().int().min(1).max(500).default(500),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_COMMENT_BODY,
+  MAX_URL_KEY,
   listThreadsQuerySchema,
   newCommentSchema,
   newThreadSchema,
@@ -96,6 +97,27 @@ describe("newThreadSchema", () => {
     const result = newThreadSchema.safeParse({
       ...validThreadPayload,
       firstComment: "a".repeat(MAX_COMMENT_BODY + 1),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  // Regression: urlKey used to allow up to 1024 characters here while
+  // sql/mysql.sql's indexed `url_key varchar(512)` column could only ever
+  // store 512 — a key in the 513-1024 range validated and inserted on
+  // Postgres but failed on MySQL. See MAX_URL_KEY's doc comment and
+  // schema-limits.test.ts for the drift check.
+  it("accepts a urlKey exactly MAX_URL_KEY characters long", () => {
+    const result = newThreadSchema.safeParse({
+      ...validThreadPayload,
+      urlKey: "a".repeat(MAX_URL_KEY),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a urlKey over MAX_URL_KEY characters long", () => {
+    const result = newThreadSchema.safeParse({
+      ...validThreadPayload,
+      urlKey: "a".repeat(MAX_URL_KEY + 1),
     });
     expect(result.success).toBe(false);
   });
@@ -207,6 +229,18 @@ describe("listThreadsQuerySchema", () => {
 
   it("rejects a limit over 500", () => {
     expect(listThreadsQuerySchema.safeParse({ limit: "501" }).success).toBe(false);
+  });
+
+  // Same MAX_URL_KEY regression as newThreadSchema above — the query-string
+  // urlKey filter must accept exactly what a stored thread's urlKey can be.
+  it("accepts a urlKey exactly MAX_URL_KEY characters long", () => {
+    const result = listThreadsQuerySchema.safeParse({ urlKey: "a".repeat(MAX_URL_KEY) });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a urlKey over MAX_URL_KEY characters long", () => {
+    const result = listThreadsQuerySchema.safeParse({ urlKey: "a".repeat(MAX_URL_KEY + 1) });
+    expect(result.success).toBe(false);
   });
 
   it("rejects an invalid status", () => {
