@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "In-page review overlay for React and Next.js apps: pin comments to any DOM element of a preview deployment, bring your own database.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/R3-Lab/web-review.git",
+    "directory": "packages/web-review"
+  },
+  "homepage": "https://github.com/R3-Lab/web-review#readme",
+  "bugs": {
+    "url": "https://github.com/R3-Lab/web-review/issues"
+  },
   "type": "module",
   "sideEffects": [
     "*.css"
@@ -71,9 +80,11 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "pretest": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "prepublishOnly": "pnpm run build"
   },
   "peerDependenciesMeta": {
     "next": {
