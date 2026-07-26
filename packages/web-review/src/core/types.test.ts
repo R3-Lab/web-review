@@ -21,15 +21,18 @@ function makeAdapter(
   > = {},
 ): ReviewAdapter {
   return {
-    listThreads: async () => [],
-    getThread: async () => {
+    // None of these are ever invoked in this file — they exist only to
+    // satisfy `ReviewAdapter`'s required methods, so they stay synchronous
+    // (no real `await`) rather than declared `async` with nothing to await.
+    listThreads: () => Promise.resolve([]),
+    getThread: () => {
       throw new ReviewApiError(404, "not found");
     },
-    createThread: async (input) => makeThread(input.category),
-    addComment: async () => {
+    createThread: (input) => Promise.resolve(makeThread(input.category)),
+    addComment: () => {
       throw new ReviewApiError(404, "not found");
     },
-    setStatus: async (_id, status) => makeThread("bug", status),
+    setStatus: (_id, status) => Promise.resolve(makeThread("bug", status)),
     ...overrides,
   };
 }
@@ -143,12 +146,12 @@ describe("resolveConfig", () => {
     // wins, even when the adapter could upload.
     it("resolves false when unset and the adapter has no uploadScreenshot", () => {
       const adapter = makeAdapter();
-      expect(adapter.uploadScreenshot).toBeUndefined();
+      expect(typeof adapter.uploadScreenshot).toBe("undefined");
       expect(resolveConfig({ adapter }).screenshots).toBe(false);
     });
 
     it("resolves true when unset and the adapter has uploadScreenshot", () => {
-      const adapter = makeAdapter({ uploadScreenshot: async () => null });
+      const adapter = makeAdapter({ uploadScreenshot: () => Promise.resolve(null) });
       expect(resolveConfig({ adapter }).screenshots).toBe(true);
     });
 
@@ -160,7 +163,7 @@ describe("resolveConfig", () => {
     });
 
     it("resolves false when explicitly false even though the adapter has uploadScreenshot", () => {
-      const adapter = makeAdapter({ uploadScreenshot: async () => null });
+      const adapter = makeAdapter({ uploadScreenshot: () => Promise.resolve(null) });
       expect(
         resolveConfig({ adapter, screenshots: false }).screenshots,
       ).toBe(false);
