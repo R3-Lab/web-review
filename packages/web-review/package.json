@@ -1,0 +1,105 @@
+{
+  "name": "@r3lab/web-review",
+  "version": "0.1.0",
+  "description": "In-page review overlay for React and Next.js apps: pin comments to any DOM element of a preview deployment, bring your own database.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "files": [
+    "dist",
+    "sql"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./next": {
+      "import": {
+        "types": "./dist/next/index.d.ts",
+        "default": "./dist/next/index.js"
+      },
+      "require": {
+        "types": "./dist/next/index.d.cts",
+        "default": "./dist/next/index.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server/index.d.ts",
+        "default": "./dist/server/index.js"
+      },
+      "require": {
+        "types": "./dist/server/index.d.cts",
+        "default": "./dist/server/index.cjs"
+      }
+    },
+    "./drizzle": {
+      "import": {
+        "types": "./dist/drizzle/index.d.ts",
+        "default": "./dist/drizzle/index.js"
+      },
+      "require": {
+        "types": "./dist/drizzle/index.d.cts",
+        "default": "./dist/drizzle/index.cjs"
+      }
+    },
+    "./styles.css": "./dist/styles.css",
+    "./sql/*": "./sql/*"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "@zumer/snapdom": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@zumer/snapdom": "^2.22.0",
+    "drizzle-orm": "^0.45.2",
+    "eslint": "^10.8.0",
+    "jsdom": "^29.1.1",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "@zumer/snapdom": "^2.12",
+    "drizzle-orm": ">=0.30",
+    "next": ">=14",
+    "react": ">=18",
+    "react-dom": ">=18"
+  }
+}

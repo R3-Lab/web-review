@@ -1,0 +1,21 @@
+{
+  "name": "r3-web-review",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -F @r3lab/web-review build",
+    "test": "pnpm -F @r3lab/web-review test",
+    "typecheck": "pnpm -F @r3lab/web-review typecheck",
+    "lint": "pnpm -F @r3lab/web-review lint",
+    "dev": "pnpm -F @r3lab/web-review dev"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}

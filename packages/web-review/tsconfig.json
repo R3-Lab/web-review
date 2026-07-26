@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": true,
+    // tsup's dts bundler (rollup-plugin-dts) always passes a `baseUrl`
+    // compiler option internally, even though this package doesn't use
+    // path aliases. TS 6.0 flags `baseUrl` as deprecated ahead of its
+    // removal in TS 7.0; this only silences that forward-compat notice,
+    // it does not affect type checking.
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["src"]
+}
