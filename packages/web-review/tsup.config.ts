@@ -3,21 +3,24 @@ import { defineConfig } from "tsup";
 
 // Two entry GROUPS, each its own config object, rather than one flat
 // `entry` map — see the `splitting` comment on the first group for why the
-// overlay's dynamic `import()` boundary needs `splitting: true` scoped to
-// ONLY the two "use client" entries (index, next/client), and why the
+// overlay's dynamic `import()` boundary needs real chunk-splitting scoped
+// to ONLY the two "use client" entries (index, next/client) and ONLY the
+// `esm` output (never `cjs` — see that same comment for why), and why the
 // three server-only entries stay on the original `splitting: false`
-// (single self-contained bundle per entry) with nothing else about them
-// changed.
+// (single self-contained bundle per entry, both formats) with nothing else
+// about them changed.
 //
 // Splitting is a whole-config setting (tsup reads `options.splitting`
-// once per format, uniformly across every entry in that config — see
+// once per format, uniformly across every ENTRY in that config, though not
+// uniformly across formats — see the first group's own comment — see
 // `node_modules/tsup/dist/index.js`, the `splitting` local right before
 // the per-format `Promise.all`), so getting two different values for it
-// requires two config objects. esbuild's own docs say as much directly:
-// "If you want to only let certain entry points share code, you can run
-// esbuild multiple times for different groups of entry points" — which is
-// exactly what an array `tsup.config.ts` does, one `build()` call (and one
-// underlying esbuild run) per array item.
+// across ENTRY groups requires two config objects. esbuild's own docs say
+// as much directly: "If you want to only let certain entry points share
+// code, you can run esbuild multiple times for different groups of entry
+// points" — which is exactly what an array `tsup.config.ts` does, one
+// `build()` call (and one underlying esbuild run per format) per array
+// item.
 //
 // CLEANING: tsup runs every item in an array config CONCURRENTLY
 // (`await Promise.all([...configData].map(async (item) => {...}))` in
@@ -99,17 +102,15 @@ export default defineConfig([
     // integration (src/esbuild/index.ts in the installed tsup 8.5.1
     // package: "When splitting is enabled, esbuild generates multiple
     // chunks, and each entry chunk retains its original directive
-    // prologues") and against the actual build output here, which
-    // src/build-output.test.ts asserts directly (`"use client"` as the
-    // literal first line of dist/index.js and dist/next/client.js). What
-    // splitting changes is that a module reached via a dynamic `import()`
-    // — `../overlay/overlay-root` behind `React.lazy`
-    // (src/overlay/review-overlay.tsx) and `next/dynamic`
-    // (src/next/client.tsx) — is emitted as its own chunk file instead of
-    // being inlined into the entry, and the `import()` call is rewritten
-    // to point at that file. Without splitting, esbuild does the opposite
-    // ("an `import('path')` expression behaves similar to
-    // `Promise.resolve(require('path'))` and still bundles the imported
+    // prologues") and against the actual ESM build output here, which
+    // src/build-output.test.ts asserts directly. What splitting changes is
+    // that a module reached via a dynamic `import()` — `../overlay/overlay-root`
+    // behind `React.lazy` (src/overlay/review-overlay.tsx) and
+    // `next/dynamic` (src/next/client.tsx) — is emitted as its own chunk
+    // file instead of being inlined into the entry, and the `import()`
+    // call is rewritten to point at that file. Without splitting, esbuild
+    // does the opposite ("an `import('path')` expression behaves similar
+    // to `Promise.resolve(require('path'))` and still bundles the imported
     // file into the entry point bundle" — esbuild's own docs), which is
     // why dist/index.js and dist/next/client.js used to ship the entire
     // overlay (~50 KB each) inline regardless of whether the tool was
@@ -132,7 +133,51 @@ export default defineConfig([
     // report for the full analysis; this file can only guarantee the
     // `import()` boundary is real, not that every possible re-export path
     // to the same module is absent.
-    splitting: true,
+    //
+    // `splitting` is deliberately NOT set here as a boolean — leaving it
+    // `undefined` is load-bearing, not an oversight. esbuild's own code
+    // splitting only works for the `esm` output format (its docs say so
+    // directly, and this repo's own `node_modules/tsup/dist/index.js`
+    // encodes the same fact: the `splitting` local used for the real
+    // esbuild call is `typeof options.splitting === "boolean" ?
+    // options.splitting : format === "esm"` — true only for `esm` when
+    // left unset). Setting `splitting: true` explicitly, as an earlier
+    // version of this file did, forces that same boolean onto the `cjs`
+    // build too — and tsup's own per-format build loop reacts to
+    // `format === "cjs" && splitting` by asking esbuild for `"esm"` output
+    // instead of `"cjs"` (same file, the `format:` line inside the
+    // `esbuild.build()` call), then converts that split ESM into CJS with
+    // a SEPARATE transform (recognizable in the output by its
+    // `_interopRequireWildcard`/`_nullishCoalesce` helpers, which are not
+    // esbuild's own CJS helper names). That conversion does not preserve
+    // directive-prologue position: it emits `"use strict";
+    // Object.defineProperty(exports, "__esModule", ...)` and helper
+    // function declarations FIRST, unconditionally, and only then whatever
+    // came after the original source's directive — so `"use client"` ends
+    // up several statements into the file instead of as the prologue's
+    // first (and only) string-literal statement. Per the ECMAScript
+    // directive-prologue rule (the leading run of string-literal
+    // expression statements, ending at the first non-string statement), a
+    // directive stranded after `Object.defineProperty(...)` has no
+    // directive meaning at all — it is a dead expression statement, and
+    // Next's client-boundary scanner (which reads the prologue) does not
+    // see it. Reproduced by rebuilding with `splitting: true` restored
+    // here and inspecting `dist/index.cjs`/`dist/next/client.cjs` — the
+    // corrupted prologue is real, not theoretical — then fixed by removing
+    // the explicit `true` and confirming the CJS output goes back to
+    // esbuild's normal, unsplit `cjs` path (its usual `__defProp`-style
+    // helpers, `"use client"` as the literal second statement right after
+    // `"use strict"`, matching this package's pre-WP15 CJS shape exactly).
+    // src/build-output.test.ts's directive-prologue tests assert the
+    // position, not just the presence, of the directive in all four of
+    // dist/index.{js,cjs} and dist/next/client.{js,cjs} specifically so
+    // this class of regression fails loudly again if reintroduced.
+    //
+    // The `esm` build's real chunk split is unaffected by any of this:
+    // that half of the pre-existing bug (`format === "cjs" && splitting`)
+    // never applies when building the `esm` format, so it already took the
+    // normal esbuild-native splitting path with a correct prologue, both
+    // before and after this fix.
     // Forces `@types/node`'s ambient globals (`process`, used by
     // `process.env.NEXT_PUBLIC_REVIEW_ENABLED` in src/next/client.tsx) into
     // this group's `.d.ts` rollup. Needed ONLY here, and only because of
