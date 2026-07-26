@@ -13,17 +13,24 @@ import { OVERLAY_ATTR } from "../anchor";
 import type { ReviewThreadView } from "../core/types";
 import { ReviewOverlay } from "./review-overlay";
 
-// `ReviewOverlay` loads `./overlay-root` behind a `React.lazy` dynamic
-// `import()`, by design (see that file's header) — so it is never fetched
-// until the gate actually opens. The FIRST time any test opens the gate,
-// that import has to be transformed and evaluated for the first time, which
-// can take longer than a single `findByRole` poll cycle and would make
-// whichever test happens to run first flaky. Pre-warming it here (still via
-// a real dynamic import, so the "never fetched while off" property is
-// exercised — just not timed against it) means every test's own timing
-// reflects the gate logic, not module-load cold-start cost.
+// `ReviewOverlay` loads `./overlay-root` — and, as of WP4b, `./composer`,
+// `./panel`, and `./unlock-dialog` alongside it, so its render props have
+// working defaults out of the box — behind a single `React.lazy` dynamic
+// `import()`, by design (see that file's header) — so none of the four are
+// fetched until the gate actually opens. The FIRST time any test opens the
+// gate, all four imports have to be transformed and evaluated for the first
+// time, which can take longer than a single `findByRole` poll cycle and
+// would make whichever test happens to run first flaky. Pre-warming them
+// here (still via real dynamic imports, so the "never fetched while off"
+// property is exercised — just not timed against it) means every test's own
+// timing reflects the gate logic, not module-load cold-start cost.
 beforeAll(async () => {
-  await import("./overlay-root");
+  await Promise.all([
+    import("./overlay-root"),
+    import("./composer"),
+    import("./panel"),
+    import("./unlock-dialog"),
+  ]);
 });
 
 /**
