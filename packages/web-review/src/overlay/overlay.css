@@ -429,3 +429,573 @@ body.r3wr-picking {
     transform: rotate(-45deg);
   }
 }
+
+/* ═══════════════════════════ WP4b: panel surfaces ═══════════════════════════
+ * Side panel, thread cards, thread detail, composer/field/button primitives,
+ * the category picker, the spinner, and the narrow-screen bottom-sheet
+ * layout. Ported from the same reference's `feedback-overlay.css`
+ * ("Modern Dark"), `afb-` → `r3wr-`, `--fb-*` → `--r3wr-*` — see this file's
+ * header for the rules every rule here still follows (scoped under
+ * `.r3wr-root`, no Tailwind, category never hue-only, px not rem). */
+
+/* ── Side panel ──────────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 384px;
+  max-width: 94vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--r3wr-bg);
+  color: var(--r3wr-fg);
+  border-left: 1px solid var(--r3wr-border-strong);
+  box-shadow: var(--r3wr-shadow);
+  pointer-events: auto;
+  animation: r3wr-slide-in var(--r3wr-t-in) both;
+}
+.r3wr-root .r3wr-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--r3wr-border);
+  background: var(--r3wr-surface);
+}
+.r3wr-root .r3wr-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 auto 0 6px;
+  letter-spacing: 0.02em;
+}
+.r3wr-root .r3wr-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  /* Keep the panel's scroll from chaining into the page behind it. */
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+.r3wr-root .r3wr-panel-urlkey {
+  display: block;
+  font-size: 11.5px;
+  color: var(--r3wr-fg-muted);
+  word-break: break-all;
+  margin-bottom: 10px;
+}
+.r3wr-root .r3wr-locale-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--r3wr-surface-2);
+  border: 1px solid var(--r3wr-border-strong);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--r3wr-fg);
+}
+
+.r3wr-root .r3wr-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--r3wr-fg-muted);
+  cursor: pointer;
+}
+.r3wr-root .r3wr-icon-btn:hover {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-border-strong);
+  color: var(--r3wr-fg);
+}
+
+.r3wr-root .r3wr-highlight-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--r3wr-fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.r3wr-root .r3wr-highlight-toggle:hover {
+  color: var(--r3wr-fg);
+}
+.r3wr-root .r3wr-highlight-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--r3wr-accent);
+}
+
+.r3wr-root .r3wr-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.r3wr-root .r3wr-chip {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--r3wr-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.r3wr-root .r3wr-chip:hover {
+  background: var(--r3wr-surface-2);
+  color: var(--r3wr-fg);
+}
+.r3wr-root .r3wr-chip[aria-pressed="true"] {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-fg);
+  color: var(--r3wr-fg);
+  font-weight: 700;
+}
+
+/* ── Thread cards ────────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-thread {
+  width: 100%;
+  text-align: left;
+  display: block;
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--r3wr-border);
+  border-left: 3px solid var(--r3wr-cat, var(--r3wr-cat-other));
+  border-radius: var(--r3wr-radius);
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg);
+  font: inherit;
+  cursor: pointer;
+}
+/* A thread card is a <button>, so its rows are spans (a <div> inside a button
+   is invalid). Stack them explicitly. */
+.r3wr-root .r3wr-thread > span {
+  display: block;
+}
+.r3wr-root .r3wr-thread:hover {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-border-strong);
+  border-left-color: var(--r3wr-cat, var(--r3wr-cat-other));
+}
+.r3wr-root .r3wr-thread > span.r3wr-thread-meta,
+.r3wr-root .r3wr-thread-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+/* Category badge: hue + glyph + the word. Never hue alone. */
+.r3wr-root .r3wr-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--r3wr-cat, var(--r3wr-cat-other));
+  color: var(--r3wr-cat, var(--r3wr-cat-other));
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+/* Status badge: word + form. Open is outlined, resolved is filled — the
+   inverse of the pins, because on a dark row a filled chip reads as
+   "done/settled". */
+.r3wr-root .r3wr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--r3wr-border-strong);
+  color: var(--r3wr-fg-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.r3wr-root .r3wr-status[data-status="resolved"] {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-accent);
+  color: var(--r3wr-accent);
+  font-weight: 700;
+}
+/* Drifted: its own badge, so the third axis is text too. */
+.r3wr-root .r3wr-drift-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--r3wr-drifted);
+  color: var(--r3wr-drifted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.r3wr-root .r3wr-muted {
+  color: var(--r3wr-fg-muted);
+  font-size: 11.5px;
+}
+.r3wr-root .r3wr-thread-title {
+  font-weight: 700;
+  margin: 2px 0;
+}
+.r3wr-root .r3wr-thread-snippet {
+  font-size: 13px;
+  color: var(--r3wr-fg);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* The quoted words a `text` pin was dropped on — the point of the tool. */
+.r3wr-root .r3wr-quote {
+  margin: 6px 0;
+  padding: 4px 0 4px 9px;
+  border-left: 2px solid var(--r3wr-cat, var(--r3wr-cat-copy));
+  color: var(--r3wr-fg);
+  font-size: 12.5px;
+  font-style: italic;
+  overflow: hidden;
+  /* Quoted copy is arbitrary user text — a long unbroken token must clip,
+     not widen the panel. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* ── Thread detail ───────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 10px 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--r3wr-fg-muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.r3wr-root .r3wr-back:hover {
+  background: var(--r3wr-surface-2);
+  color: var(--r3wr-fg);
+}
+.r3wr-root .r3wr-comment {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--r3wr-border);
+}
+.r3wr-root .r3wr-comment-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.r3wr-root .r3wr-comment-author {
+  font-weight: 700;
+  font-size: 11.5px;
+}
+.r3wr-root .r3wr-comment-body {
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.r3wr-root .r3wr-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--r3wr-border-strong);
+  margin: 8px 0;
+  background: var(--r3wr-surface-2);
+}
+.r3wr-root .r3wr-shot-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  margin: 8px 0;
+  border: 1px dashed var(--r3wr-border-strong);
+  border-radius: 8px;
+  color: var(--r3wr-fg-muted);
+  font-size: 11.5px;
+}
+.r3wr-root .r3wr-drift-note {
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+  margin: 8px 0;
+  border: 1px solid var(--r3wr-drifted);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-drifted);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.r3wr-root .r3wr-drift-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ── Fields / buttons ────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-field {
+  display: block;
+  margin-bottom: 10px;
+}
+.r3wr-root .r3wr-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 5px;
+  color: var(--r3wr-fg);
+}
+.r3wr-root .r3wr-input,
+.r3wr-root .r3wr-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 10px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 8px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg);
+  font: inherit;
+  transition:
+    border-color var(--r3wr-t-out),
+    background-color var(--r3wr-t-out);
+}
+.r3wr-root .r3wr-input::placeholder,
+.r3wr-root .r3wr-textarea::placeholder {
+  color: var(--r3wr-fg-muted);
+}
+.r3wr-root .r3wr-input:hover,
+.r3wr-root .r3wr-textarea:hover {
+  border-color: var(--r3wr-fg-muted);
+}
+.r3wr-root .r3wr-textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+.r3wr-root .r3wr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.r3wr-root .r3wr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 8px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.r3wr-root .r3wr-btn:hover:not(:disabled) {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-fg-muted);
+}
+.r3wr-root .r3wr-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.r3wr-root .r3wr-btn-primary {
+  background: var(--r3wr-accent);
+  color: var(--r3wr-accent-fg);
+  border-color: var(--r3wr-accent);
+  font-weight: 700;
+}
+.r3wr-root .r3wr-btn-primary:hover:not(:disabled) {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: var(--r3wr-accent-fg);
+}
+.r3wr-root .r3wr-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--r3wr-danger);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-top: 6px;
+}
+
+/* Category picker — radio semantics, chip appearance, glyph + word. */
+.r3wr-root .r3wr-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.r3wr-root .r3wr-cat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 999px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.r3wr-root .r3wr-cat-btn:hover {
+  background: var(--r3wr-surface-2);
+  color: var(--r3wr-fg);
+}
+.r3wr-root .r3wr-cat-btn[aria-checked="true"] {
+  background: var(--r3wr-surface-2);
+  border-color: var(--r3wr-cat, var(--r3wr-cat-other));
+  color: var(--r3wr-cat, var(--r3wr-cat-other));
+  font-weight: 700;
+  /* Checked is not hue-only: it also gains a ring. */
+  box-shadow: inset 0 0 0 1px var(--r3wr-cat, var(--r3wr-cat-other));
+}
+
+/* ── Composer popover ────────────────────────────────────────────────────── */
+.r3wr-root .r3wr-composer {
+  position: fixed;
+  /* ONE formula at every width, mirrored exactly by the `left` clamp in
+     `./composer.tsx`: cap at 336px, and only shrink when the viewport
+     genuinely cannot hold it. Also reused, unclamped, by `./unlock-dialog`'s
+     `UnlockDialog` (bottom-right anchored, not pin-anchored). */
+  width: min(336px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: var(--r3wr-radius);
+  background: var(--r3wr-bg);
+  color: var(--r3wr-fg);
+  box-shadow: var(--r3wr-shadow);
+  pointer-events: auto;
+  animation: r3wr-pop var(--r3wr-t-in) both;
+}
+.r3wr-root .r3wr-composer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.r3wr-root .r3wr-composer-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-right: auto;
+}
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+/* The ONLY continuous animation these surfaces add, and it is bound to an
+   in-flight upload — it stops when the work does. */
+.r3wr-root .r3wr-spin {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 2px solid var(--r3wr-border-strong);
+  border-top-color: var(--r3wr-accent);
+  border-radius: 50%;
+  animation: r3wr-rot 0.7s linear infinite;
+}
+
+/* ── Keyframes WP4b adds ─────────────────────────────────────────────────── */
+@keyframes r3wr-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes r3wr-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes r3wr-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+@keyframes r3wr-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+/* Reduced motion: the spinner becomes a static ring instead of spinning
+   forever. A second block rather than folding into the one above, since
+   this file appends WP4b's rules after WP4a's own reduced-motion block. */
+@media (prefers-reduced-motion: reduce) {
+  .r3wr-root .r3wr-spin {
+    animation: none;
+    border-top-color: var(--r3wr-border-strong);
+    opacity: 0.6;
+  }
+}
+
+/* ── Narrow screens (checked at 375px) ───────────────────────────────────── */
+/* The panel becomes a bottom sheet so it never swallows the page it
+   annotates, and never overflows horizontally. */
+@media (max-width: 560px) {
+  .r3wr-root .r3wr-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    height: 70vh;
+    width: 100%;
+    max-width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--r3wr-border-strong);
+    border-radius: 14px 14px 0 0;
+    animation: r3wr-sheet-in var(--r3wr-t-in) both;
+  }
+  /* Only lift the launcher while the sheet is actually up. `data-panel-open`
+     is set by `OverlayRoot` on `.r3wr-root` itself (WP4a) — see that file's
+     `<div className="r3wr-root" data-panel-open={panelOpen} ...>`. */
+  .r3wr-root[data-panel-open="true"] .r3wr-toggle {
+    bottom: calc(70vh + 12px);
+  }
+  .r3wr-root .r3wr-composer {
+    /* Width is handled by the single `min()` rule above — only the height
+       needs narrowing here, to keep the composer clear of the bottom sheet. */
+    max-height: min(calc(100vh - 16px), 60vh);
+  }
+}
