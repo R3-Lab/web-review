@@ -37,9 +37,9 @@
  * var) are applied — two independent `useSyncExternalStore` subscriptions to
  * the same localStorage key, with all the drift risk that implies. Instead,
  * this file owns ONE gate (mirroring `ReviewOverlay`'s exactly, plus the env
- * var) and dynamically imports `OverlayRoot` directly, so there is exactly
- * one gate and exactly one lazy boundary, and that boundary is the one the
- * brief asks for.
+ * var) in front of ONE lazy boundary — that boundary is the one the brief
+ * asks for. What that boundary loads is covered below, in "Default
+ * surfaces".
  *
  * Three ways to switch it on, checked in this order — an explicit
  * `config.enabled` always wins (same precedent as `ResolvedReviewConfig.screenshots`
@@ -70,6 +70,24 @@
  * never requested — the same "statically dead when off" property
  * `../overlay/review-overlay`'s own doc comment attributes to its
  * `config.enabled`/localStorage gate, just with one more provably-dead input.
+ *
+ * ## Default surfaces
+ *
+ * `DynamicOverlayRoot` is `../overlay/default-surfaces`'s
+ * `loadWiredOverlayRoot` — the SAME loader `../overlay/review-overlay` passes
+ * to `React.lazy` — passed to `next/dynamic` instead. Both `React.lazy` and
+ * `next/dynamic` accept an identical loader shape
+ * (`() => Promise<{ default: ComponentType<P> }>`), so one function serves
+ * both lazy boundaries: `OverlayRoot`'s `Composer`/`Panel`/`UnlockDialog`
+ * defaults are wired in exactly once, here and in `ReviewOverlay` alike, and
+ * cannot drift between the two entries the way they did before this module
+ * existed (this file used to `import("../overlay/overlay-root").then((m) =>
+ * m.OverlayRoot)` directly, bypassing the default wiring entirely). Render
+ * props passed to THIS file's `ReviewOverlay` still flow straight through to
+ * `loadWiredOverlayRoot`'s `WiredOverlayRoot`, which prefers them
+ * (`props.renderComposer ?? ...`) over its own defaults — so overriding one
+ * surface here still leaves the other two stock, same as the
+ * framework-agnostic entry.
  *
  * ## Route-change awareness
  *
@@ -107,6 +125,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { resolveConfig } from "../core/config";
 import type { ReviewConfig } from "../core/config";
+import { loadWiredOverlayRoot } from "../overlay/default-surfaces";
 import type {
   ComposerRenderProps,
   PanelRenderProps,
@@ -125,17 +144,17 @@ const DEFAULT_STORAGE_PREFIX = "r3wr";
 const ENV_ENABLED = process.env.NEXT_PUBLIC_REVIEW_ENABLED === "1";
 
 /**
- * `OverlayRoot` (`../overlay/overlay-root`) behind `next/dynamic` rather
- * than `React.lazy` — see the file header for why this replaces (rather
- * than wraps) `ReviewOverlay`'s own lazy boundary. `ssr: false` is legal
- * here only because this module is a Client Component; the overlay is
- * browser-only (`document.elementFromPoint`, `getSelection`,
+ * `OverlayRoot`, wired with its default `Composer`/`Panel`/`UnlockDialog`
+ * surfaces, behind `next/dynamic` rather than `React.lazy` — see the file
+ * header's "Why `next/dynamic`" for why this replaces (rather than wraps)
+ * `ReviewOverlay`'s own lazy boundary, and its "Default surfaces" section for
+ * why `loadWiredOverlayRoot` (`../overlay/default-surfaces`) — not a direct
+ * `import("../overlay/overlay-root")` — is what's passed here. `ssr: false`
+ * is legal here only because this module is a Client Component; the overlay
+ * is browser-only (`document.elementFromPoint`, `getSelection`,
  * `localStorage`, a portal to `<body>`), so there is nothing to prerender.
  */
-const DynamicOverlayRoot = dynamic(
-  () => import("../overlay/overlay-root").then((m) => m.OverlayRoot),
-  { ssr: false },
-);
+const DynamicOverlayRoot = dynamic(loadWiredOverlayRoot, { ssr: false });
 
 export interface ReviewOverlayProps {
   config: ReviewConfig;
