@@ -5,9 +5,11 @@
  *
  * The click in `dropElementPin` lands dead-center on the target
  * (Playwright's default click point), so the captured `offsetPct` is very
- * close to `{x:0.5, y:0.5}` — that makes "the pin's on-screen position"
- * directly comparable to "the target element's bounding-box center" with a
- * small pixel tolerance, rather than needing to replicate the offset math.
+ * close to `{x:0.5, y:0.5}` — that makes "the pin's tip" (see `tipOf` in
+ * `./helpers.ts`, and `.r3wr-pin`'s CSS comment for why it's the tip and
+ * not the marker's bounding-box center) directly comparable to "the target
+ * element's bounding-box center" with a small pixel tolerance, rather than
+ * needing to replicate the offset math.
  *
  * The target is deliberately a LEAF element (a button, no nested block
  * children): `captureAnchor` anchors to whatever `document.elementFromPoint`
@@ -20,24 +22,32 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { centerOf, dropElementPin, marker, pinByTitleText, unlock, unlockedToggle } from "./helpers";
+import { centerOf, dropElementPin, marker, pinByTitleText, tipOf, unlock, unlockedToggle } from "./helpers";
 
 /**
- * Tight: `centerOf` reads `boundingBox()`, and rotation around a fixed
- * transform-origin never moves an element's own center — so a correctly
- * centered pin should land within a couple of sub-pixel rounding errors of
- * the target's, not merely "close by chance". A few px of slack covers
+ * Tight: `tipOf` reads `boundingBox()`, and a correctly-placed pin's tip
+ * should land within a couple of sub-pixel rounding errors of the target's
+ * true center — not merely "close by chance". A few px of slack covers
  * layout jitter (e.g. a late web-font swap), nothing more.
  *
- * Previously widened to 20 to paper over a real, reproducible ~15-16px
- * gap (WP29): `.r3wr-pin`/`.r3wr-pin-draft` used `margin-top: -30px`
- * (a full box-height) instead of `-15px` (half — matching `margin-left`).
- * Since a marker's `getBoundingClientRect()` bounding box is centered on
- * its own untransformed box regardless of `border-radius`, that
- * asymmetric margin put the box's rendered CENTER 15px above the intended
- * anchor point, even though the visual "tip" landed close to it — the pin
- * looked roughly right but measured wrong. Fixed in `overlay.css`; see its
- * comment on `.r3wr-pin` for the geometry.
+ * History, for anyone tempted to touch this number again:
+ *  - Originally 20, papering over a real, reproducible ~15-16px gap
+ *    (WP29): `.r3wr-pin`/`.r3wr-pin-draft` used `margin-top: -30px`
+ *    instead of the ~-36.2px that puts the marker's TIP exactly on its
+ *    anchor — see `.r3wr-pin`'s CSS comment in `overlay.css` for the
+ *    derivation. -30px was close, not exact.
+ *  - WP29's own "fix" made this WORSE, not better: it set
+ *    `margin-top: -15px` (matching `margin-left`) so the bounding-box
+ *    CENTER sat exactly on the anchor. That made THIS test pass at tight
+ *    tolerances — `centerOf(pin)` really was within a few px of
+ *    `centerOf(target)` — but it was asserting the wrong thing. A
+ *    teardrop marker's CENTER landing on the target means its ROUND BODY
+ *    covers the target, not its tip pointing at it; the regenerated
+ *    product screenshots showed pins sitting on top of the content they
+ *    were meant to flag. WP32 reverted the CSS and fixed the assertion
+ *    below to compare the tip (`tipOf`), not the bounding-box center, to
+ *    the target's center — which is the geometry the design actually
+ *    wants.
  */
 const POSITION_TOLERANCE_PX = 5;
 
@@ -63,7 +73,7 @@ test.describe("pin survives a reload, anchored to the same element", () => {
     const pinBefore = pinByTitleText(page, mark);
     await expect(pinBefore).toBeVisible();
     const targetCenterBefore = await centerOf(target);
-    const pinCenterBefore = await centerOf(pinBefore);
+    const pinTipBefore = await tipOf(pinBefore);
 
     // ── the actual reload ──────────────────────────────────────────────
     // The access cookie is httpOnly and survives the reload in this same
@@ -80,13 +90,13 @@ test.describe("pin survives a reload, anchored to the same element", () => {
     await expect(pinAfter).toHaveAttribute("data-drifted", "false");
 
     const targetCenterAfter = await centerOf(page.getByTestId("cta-primary"));
-    const pinCenterAfter = await centerOf(pinAfter);
+    const pinTipAfter = await tipOf(pinAfter);
 
     // Report-worthy values — see the task write-up for the actual numbers
     // this produced.
     testInfo.attach("reload-anchor-measurements.json", {
       body: JSON.stringify(
-        { targetCenterBefore, pinCenterBefore, targetCenterAfter, pinCenterAfter },
+        { targetCenterBefore, pinTipBefore, targetCenterAfter, pinTipAfter },
         null,
         2,
       ),
@@ -94,19 +104,19 @@ test.describe("pin survives a reload, anchored to the same element", () => {
     });
 
     expect(
-      Math.abs(pinCenterAfter.x - targetCenterAfter.x),
-      `pin x (${pinCenterAfter.x}) should be within ${POSITION_TOLERANCE_PX}px of the target's live center x (${targetCenterAfter.x})`,
+      Math.abs(pinTipAfter.x - targetCenterAfter.x),
+      `pin tip x (${pinTipAfter.x}) should be within ${POSITION_TOLERANCE_PX}px of the target's live center x (${targetCenterAfter.x})`,
     ).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
     expect(
-      Math.abs(pinCenterAfter.y - targetCenterAfter.y),
-      `pin y (${pinCenterAfter.y}) should be within ${POSITION_TOLERANCE_PX}px of the target's live center y (${targetCenterAfter.y})`,
+      Math.abs(pinTipAfter.y - targetCenterAfter.y),
+      `pin tip y (${pinTipAfter.y}) should be within ${POSITION_TOLERANCE_PX}px of the target's live center y (${targetCenterAfter.y})`,
     ).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
 
     // And, for good measure: pre- and post-reload pin positions agree with
     // each other too, not just with the target — the anchor didn't just
     // happen to re-resolve near the right spot, it resolved to the exact
     // same visual position it had before the reload.
-    expect(Math.abs(pinCenterAfter.x - pinCenterBefore.x)).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
-    expect(Math.abs(pinCenterAfter.y - pinCenterBefore.y)).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
+    expect(Math.abs(pinTipAfter.x - pinTipBefore.x)).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
+    expect(Math.abs(pinTipAfter.y - pinTipBefore.y)).toBeLessThanOrEqual(POSITION_TOLERANCE_PX);
   });
 });

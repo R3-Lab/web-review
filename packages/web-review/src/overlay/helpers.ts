@@ -30,9 +30,14 @@ export interface DocRect {
  * absolutely-positioned pin near the right or bottom edge contributes to the
  * document's scrollable overflow — an overlay that promises not to disturb
  * the page must not be the reason a horizontal scrollbar appears. The
- * caller's CSS margins center the marker ON this point (each margin is
- * -half the box's own dimension — see `.r3wr-pin`'s CSS comment), so
- * roughly half a pin's width of headroom in each direction is enough.
+ * caller's CSS margins put the marker's TIP (not its bounding-box center)
+ * on this point, body above — see `.r3wr-pin`'s CSS comment for the exact
+ * geometry — so the real headroom the marker needs is asymmetric: ~0px
+ * below the point (the tip sits right on it), ~21px either side, and ~42px
+ * above (the rotated body). `PIN` below is a flat compromise, not a true
+ * per-edge bound — good enough in practice since a pin rarely sits within
+ * a few px of the document's own edge, but a marker anchored deep in that
+ * corner can still clip slightly at the top.
  */
 export function clampToDocument(
   left: number,

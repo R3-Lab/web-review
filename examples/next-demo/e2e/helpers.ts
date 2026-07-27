@@ -141,6 +141,22 @@ export async function centerOf(locator: Locator): Promise<{ x: number; y: number
 }
 
 /**
+ * The visual TIP of a `.r3wr-pin`/`.r3wr-pin-draft` marker — the pointed
+ * corner meant to touch its anchor — as opposed to `centerOf`'s
+ * bounding-box center. `.r3wr-pin` is a 30×30 box, `border-radius:
+ * 50% 50% 50% 0`, `rotate(-45deg)`, positioned so its tip lands on the
+ * anchor point (see that rule's CSS comment in `overlay.css` for the exact
+ * margin derivation). For that specific shape and rotation, the tip works
+ * out to exactly the bounding box's own bottom-center point — no need to
+ * replicate the rotation math here, just read it off `boundingBox()`.
+ */
+export async function tipOf(locator: Locator): Promise<{ x: number; y: number }> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error("Element has no bounding box (not visible/attached)");
+  return { x: box.x + box.width / 2, y: box.y + box.height };
+}
+
+/**
  * Finds the substring's bounding client rect inside `container` via a
  * throwaway `Range` (never mutates the live selection) — used to compute
  * real mouse-drag coordinates for a genuine text selection gesture.
