@@ -23,25 +23,23 @@ import { test, expect } from "@playwright/test";
 import { centerOf, dropElementPin, marker, pinByTitleText, unlock, unlockedToggle } from "./helpers";
 
 /**
- * Generous but still meaningful — a coincidental match would need the
- * resolver to place the pin within a couple percent of the viewport's
- * height of the right element purely by chance, when in principle it could
- * render anywhere on the page (or not at all).
+ * Tight: `centerOf` reads `boundingBox()`, and rotation around a fixed
+ * transform-origin never moves an element's own center — so a correctly
+ * centered pin should land within a couple of sub-pixel rounding errors of
+ * the target's, not merely "close by chance". A few px of slack covers
+ * layout jitter (e.g. a late web-font swap), nothing more.
  *
- * Not tightened to a few px: this repeatably measures a small (~15-16px)
- * gap between the pin's rendered position and the target's freshly-read
- * `getBoundingClientRect()`, on an EXACT-SELECTOR (confidence 1) bind —
- * i.e. not a fuzzy-match imprecision. The likely cause is that the pin's
- * position is computed once per `OverlayRoot` render and only refreshed on
- * an explicit trigger (scroll/resize/DOM mutation — see its
- * `MutationObserver` in overlay-root.tsx), while a late, small layout
- * settle after mount (e.g. a web-font swap) can move the target by a few
- * px without firing any of those triggers. Worth a closer look, but it is
- * a minor position-freshness nuance, not a re-anchoring failure — the
- * load-bearing claim (confident bind, not drifted, same element) is
- * unaffected and asserted separately below.
+ * Previously widened to 20 to paper over a real, reproducible ~15-16px
+ * gap (WP29): `.r3wr-pin`/`.r3wr-pin-draft` used `margin-top: -30px`
+ * (a full box-height) instead of `-15px` (half — matching `margin-left`).
+ * Since a marker's `getBoundingClientRect()` bounding box is centered on
+ * its own untransformed box regardless of `border-radius`, that
+ * asymmetric margin put the box's rendered CENTER 15px above the intended
+ * anchor point, even though the visual "tip" landed close to it — the pin
+ * looked roughly right but measured wrong. Fixed in `overlay.css`; see its
+ * comment on `.r3wr-pin` for the geometry.
  */
-const POSITION_TOLERANCE_PX = 20;
+const POSITION_TOLERANCE_PX = 5;
 
 test.describe("pin survives a reload, anchored to the same element", () => {
   test.beforeEach(async ({ page }) => {

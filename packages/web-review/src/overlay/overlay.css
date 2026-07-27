@@ -265,8 +265,17 @@ body.r3wr-picking {
   position: absolute;
   width: 30px;
   height: 30px;
+  /* Both margins are -half the box's own dimension, so the pin's rendered
+     BOUNDING BOX (what getBoundingClientRect measures, unaffected by
+     border-radius) is centered exactly on the `left`/`top` coordinate
+     passed in — that coordinate is the anchor's captured/resolved point,
+     and Pin/DraftPin are meant to visually center on it, not point at it
+     with one corner. A previous `margin-top: -30px` (a full box-height,
+     copied from a design that wanted the box entirely above the point)
+     left the rendered center 15px above the anchor — reproduced and fixed
+     under WP29; see `examples/next-demo/e2e/reload-anchor.spec.ts`. */
   margin-left: -15px;
-  margin-top: -30px;
+  margin-top: -15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -306,8 +315,9 @@ body.r3wr-picking {
   position: absolute;
   width: 30px;
   height: 30px;
+  /* Same centering fix as `.r3wr-pin` above — see its comment. */
   margin-left: -15px;
-  margin-top: -30px;
+  margin-top: -15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
