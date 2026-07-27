@@ -9,20 +9,14 @@
 // `UnlockDialog` are wired in as `ReviewOverlay`'s defaults for
 // `renderComposer` / `renderPanel` / `renderUnlockDialog` — see
 // `./overlay/overlay-root` for the exact seam each one implements against —
-// and are exported here too, individually, for a consumer who wants to
-// override just one surface while reusing the others.
-//
-// That per-surface override is the whole reason those four are exported as
-// VALUES from this entry rather than left reachable only through the lazy
-// boundary — and it has a bundle-size cost (see the README's "Bundle cost"
-// section): each one imports `OVERLAY_ATTR` from `./anchor` directly to mark
-// its own DOM, so a consumer who imports anything else from this same entry
-// (this package's own demo app imports `createHttpAdapter` from it) ends up
-// with all four, and the anchoring engine behind them, in their eager
-// bundle under webpack — they don't tree-shake away just because a given
-// page never actually overrides a surface. The only confirmed way around
-// that today is importing `ReviewOverlay` from `@r3lab/web-review/next/client`
-// exclusively and sourcing everything else from elsewhere.
+// but are exported as VALUES from `@r3lab/web-review/surfaces`, not this
+// entry: see that file's own header for why the split exists (this file and
+// it both carry `"use client"`, and Next's webpack integration forces the
+// full export list of any `"use client"` file into a consumer's client
+// bundle, independent of what's actually used — so keeping them off `.`
+// means importing `createHttpAdapter`, or anything else, from here no
+// longer drags them in under webpack). See "Bundle cost" in the README for
+// the measurement and "Customizing a surface" for how to override one.
 
 export * from "./core/types";
 export * from "./core/adapter";
@@ -41,9 +35,5 @@ export type {
   ShotState,
   UnlockRenderProps,
 } from "./overlay/overlay-root";
-export * from "./overlay/composer";
-export * from "./overlay/panel";
-export * from "./overlay/thread-detail";
-export * from "./overlay/unlock-dialog";
 
 export const VERSION = "0.1.0";

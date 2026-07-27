@@ -391,6 +391,65 @@ describe.skipIf(!distExists)("dist/ build output", () => {
       }
     });
 
+    /**
+     * Regression test: the four default UI surfaces (`Composer`, `Panel`,
+     * `ThreadDetail`, `UnlockDialog` — plus `PasswordForm`, the shared
+     * password field two of them use inline) used to be re-exported
+     * directly from `src/index.ts` via `export * from "./overlay/composer"`
+     * etc. Next.js's webpack integration captures the FULL export list of
+     * any `"use client"` file reachable from a Server Component's module
+     * graph (confirmed against Next's own `next-flight-client-entry-loader`
+     * source — see "Bundle cost" in the README), so their mere presence in
+     * `dist/index.js`'s own `export { ... }` statement — not whether
+     * application code actually used them — was what forced them into a
+     * consumer's eager client bundle. Moved onto their own
+     * `@r3lab/web-review/surfaces` subpath (`src/surfaces.ts`) instead, so
+     * only an actual import from that subpath pays for them.
+     *
+     * `dist/index.js` (ESM) is the file this checks, not `dist/index.cjs`:
+     * the CJS build deliberately never gets real code-splitting (see the
+     * "overlay code-splitting stays real" describe block above), so it
+     * inlines the ENTIRE lazily-loaded overlay implementation — surfaces
+     * included — into one self-contained file regardless, exactly as it did
+     * before this change and exactly as `dist/next/client.cjs` still does.
+     * That's unrelated to this fix (a CJS consumer was never getting
+     * tree-shaking here to begin with) and not what "Bundle cost" is about.
+     */
+    it('dist/index.js (ESM) does not reference any of the four surfaces (or their shared PasswordForm) at all', () => {
+      const content = readFileSync(join(distDir, "index.js"), "utf8");
+      for (const name of ["Composer", "Panel", "ThreadDetail", "UnlockDialog", "PasswordForm"]) {
+        expect(
+          new RegExp(`\\b${name}\\b`).test(content),
+          `dist/index.js should not reference "${name}" at all — it belongs on @r3lab/web-review/surfaces now`,
+        ).toBe(false);
+      }
+    });
+
+    it("dist/surfaces.{js,cjs} DO export all four surfaces, plus PasswordForm", () => {
+      for (const relPath of ["surfaces.js", "surfaces.cjs"]) {
+        const content = readFileSync(join(distDir, relPath), "utf8");
+        for (const name of ["Composer", "Panel", "ThreadDetail", "UnlockDialog", "PasswordForm"]) {
+          expect(new RegExp(`\\b${name}\\b`).test(content), `${relPath} should export "${name}"`).toBe(true);
+        }
+      }
+    });
+
+    it('"use client" is inside the directive prologue of dist/surfaces.{js,cjs} too — it exports client components, same as index/next-client', () => {
+      for (const relPath of ["surfaces.js", "surfaces.cjs"]) {
+        const content = readFileSync(join(distDir, relPath), "utf8");
+        expect(
+          hasDirective(content, "use client"),
+          `${relPath}: "use client" must be part of the directive prologue (a leading run of bare string-literal statements), not just present somewhere in the file. Actual prologue found: ${JSON.stringify(directivePrologue(content))}`,
+        ).toBe(true);
+      }
+    });
+
+    it("the surfaces entry emits all four artifact types (ESM, CJS, .d.ts, .d.cts), like every other entry", () => {
+      for (const relPath of ["surfaces.js", "surfaces.cjs", "surfaces.d.ts", "surfaces.d.cts"]) {
+        expect(existsSync(join(distDir, relPath)), `dist/${relPath} should exist`).toBe(true);
+      }
+    });
+
     it("@zumer/snapdom is only ever reached through a dynamic import — never a static import or a bare require, anywhere in dist/", () => {
       const offenders: string[] = [];
       // Matches the specifier only where it's actually a module

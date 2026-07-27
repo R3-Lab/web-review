@@ -51,6 +51,16 @@
         "default": "./dist/next/client.cjs"
       }
     },
+    "./surfaces": {
+      "import": {
+        "types": "./dist/surfaces.d.ts",
+        "default": "./dist/surfaces.js"
+      },
+      "require": {
+        "types": "./dist/surfaces.d.cts",
+        "default": "./dist/surfaces.cjs"
+      }
+    },
     "./server": {
       "import": {
         "types": "./dist/server/index.d.ts",

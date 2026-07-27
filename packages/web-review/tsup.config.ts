@@ -4,9 +4,9 @@ import { defineConfig } from "tsup";
 // Two entry GROUPS, each its own config object, rather than one flat
 // `entry` map — see the `splitting` comment on the first group for why the
 // overlay's dynamic `import()` boundary needs real chunk-splitting scoped
-// to ONLY the two "use client" entries (index, next/client) and ONLY the
-// `esm` output (never `cjs` — see that same comment for why), and why the
-// three server-only entries stay on the original `splitting: false`
+// to ONLY the three "use client" entries (index, next/client, surfaces) and
+// ONLY the `esm` output (never `cjs` — see that same comment for why), and
+// why the three server-only entries stay on the original `splitting: false`
 // (single self-contained bundle per entry, both formats) with nothing else
 // about them changed.
 //
@@ -95,6 +95,24 @@ export default defineConfig([
     entry: {
       index: "src/index.ts",
       "next/client": "src/next/client.tsx",
+      // The four default UI surfaces (`Composer`/`Panel`/`ThreadDetail`/
+      // `UnlockDialog`), on their own subpath rather than re-exported from
+      // `index` — see src/surfaces.ts's own header for why (the short
+      // version: any `"use client"` file's FULL export list rides along
+      // with a consumer's import of anything else from that same file,
+      // under Next's webpack integration, regardless of tsup's own
+      // chunking). Grouped here with `index`/`next/client` — not off in the
+      // second, `splitting: false` group below — because
+      // `src/overlay/default-surfaces.tsx`'s `loadWiredOverlayRoot` (which
+      // both of those entries' lazy boundaries call) ALSO reaches
+      // `Composer`/`Panel`/`UnlockDialog` via its own `import()`, so in this
+      // group's single esbuild run those implementations are reachable from
+      // two places (this entry, eagerly, and the existing lazy boundary)
+      // and esbuild's splitting shares one chunk between them instead of
+      // duplicating the code — putting `surfaces` in a separate,
+      // `splitting: false` esbuild run would inline a second, independent
+      // copy of the same implementation instead.
+      surfaces: "src/surfaces.ts",
     },
     // esbuild preserves each entry's own directive prologue (e.g. "use
     // client") as the first statement of THAT entry's own output chunk
@@ -116,7 +134,7 @@ export default defineConfig([
     // overlay (~50 KB each) inline regardless of whether the tool was
     // switched on.
     //
-    // Scoped to ONLY these two entries (see the file header) rather than
+    // Scoped to ONLY these three entries (see the file header) rather than
     // every entry, so this can't create a chunk shared between a
     // client entry and a server-only one — the three server entries below
     // keep their original single-bundle-per-entry shape untouched.
