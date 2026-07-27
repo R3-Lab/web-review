@@ -602,6 +602,34 @@ DOM node ever appears, and no request to `/api/review/*` is ever made (which
 code ever actually executed). The chunk's bytes can be downloaded without
 its code ever being called.
 
+**`resolveConfig` and the DOM-anchoring engine.** `resolveConfig` runs
+unconditionally on every render — before any gate check — and its default
+`urlKeyFromHref` used to be `normalizeUrl`, imported straight from
+`./anchor`. Since `anchor.ts` also exports the (much larger) DOM-anchoring
+engine — `OVERLAY_ATTR`, `captureAnchor`, `resolveAnchor`, `isStableClass`,
+and the rest — and is reachable both synchronously (through `resolveConfig`)
+and asynchronously (through the overlay's own lazy boundary), a bundler
+tends to keep it as one physical chunk visible to both sides, so the eager
+`resolveConfig` path pulled in the whole thing. `normalizeUrl` (plus its
+private helper) now lives in its own `src/normalize-url.ts`; `anchor.ts`
+still re-exports it, so nothing about the public API changes. Verified
+directly: `dist/next/client.js`'s own static import graph (`next/dynamic`
+excluded) is 3 files, ~4.6 KB total, with zero occurrences of
+`data-r3-review` (`OVERLAY_ATTR`'s value, a string literal that survives
+minification).
+
+That fix is scoped to `resolveConfig`'s own edge, and a consumer who imports
+*only* `@r3lab/web-review/next/client` gets the benefit of it. It does
+**not** cover every eager edge into the main `.` entry: `Composer`, `Panel`,
+`ThreadDetail`, and `UnlockDialog` are also exported as values from the main
+entry (deliberately — see [Customizing a surface](#customizing-a-surface)),
+and each imports `OVERLAY_ATTR` directly to mark its own DOM. A consumer who
+imports anything else from the main entry alongside them — this package's
+own [demo app](examples/next-demo) imports `createHttpAdapter` from it —
+pulls that whole barrel in too, and `data-r3-review` still shows up in a
+`next build --webpack` bundle as a result (confirmed by building the demo's
+disabled variant). Tracked separately as a follow-up, not fixed here.
+
 ## Keyboard and accessibility
 
 - **`c`** toggles pin-drop mode (ignored while a form field has focus, and

@@ -8,7 +8,7 @@
  * everywhere.
  */
 
-import { normalizeUrl } from "../anchor";
+import { normalizeUrl } from "../normalize-url";
 import type { ReviewAdapter } from "./adapter";
 import { DEFAULT_CATEGORIES } from "./types";
 import type { ReviewCategoryDef } from "./types";
@@ -80,7 +80,9 @@ export interface ResolvedReviewConfig {
   screenshots: boolean;
   localeFromHref: (href: string) => string | null;
   /**
-   * Defaults to this package's own `normalizeUrl` (`../anchor`): origin and
+   * Defaults to this package's own `normalizeUrl` (`../normalize-url`,
+   * re-exported from `../anchor` — see that module's header for why
+   * `normalizeUrl` lives in its own file): origin and
    * hash stripped, path kept as-is (including any locale prefix — see the
    * doc comment on `normalizeUrl` for why), tracking query params (utm_*,
    * fbclid, …) dropped, remaining params sorted for a stable key. Override
