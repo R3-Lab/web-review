@@ -99,8 +99,19 @@ const SCREENSHOT_WAIT_MS = 8_000;
 /** The overlay's top-level gate. */
 type Gate = "checking" | "locked" | "unlocked" | "disabled";
 
-/** Lifecycle of the draft pin's screenshot upload. */
-export type ShotState = "idle" | "pending" | "done" | "error";
+/**
+ * Lifecycle of the draft pin's screenshot upload.
+ *  - `"idle"`   — not attempted (screenshots off, or no pin yet).
+ *  - `"pending"` — capture/upload in flight.
+ *  - `"done"`   — a storage key came back; a screenshot really is attached.
+ *  - `"unavailable"` — capture succeeded but nothing was stored: either
+ *    `adapter.uploadScreenshot` resolved `null` (its documented "storage
+ *    failed" signal) or the composer's own capture returned no blob. Either
+ *    way, the thread is created with no image — the UI must say so, never
+ *    "attached".
+ *  - `"error"` — the upload itself threw.
+ */
+export type ShotState = "idle" | "pending" | "done" | "unavailable" | "error";
 
 /** What the hover preview is previewing, so it can be drawn accordingly. */
 interface HoverPreview {
@@ -415,7 +426,11 @@ export function OverlayRoot({
           // relying on `this` — see `use-location.ts`'s
           // `unboundHistoryMethod` for the same concern elsewhere.
           const key = (await config.adapter.uploadScreenshot?.(blob)) ?? null;
-          setShotState("done");
+          // A resolved `null` is a documented, supported outcome — capture
+          // succeeded but nothing was stored (no storage configured, or
+          // storage failed). Only a real key means "attached"; anything
+          // else must say so, never claim success.
+          setShotState(key ? "done" : "unavailable");
           return key;
         } catch (err) {
           // Hard contract: a screenshot failure is never allowed to cost the

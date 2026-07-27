@@ -228,18 +228,27 @@ export function Composer({
         </div>
       )}
 
-      <p className="r3wr-shot-note" {...TAG}>
-        {shotState === "pending" ? (
-          <>
-            <span className="r3wr-spin" {...TAG} aria-hidden="true" />
-            Capturing a screenshot…
-          </>
-        ) : shotState === "done" ? (
-          "Screenshot attached."
-        ) : (
-          "No screenshot — submitting without one."
-        )}
-      </p>
+      {/* When `config.screenshots` is false — no `adapter.uploadScreenshot` at
+          all, or the consumer explicitly opted out — no capture was ever
+          attempted, so there is nothing honest to report; the note is
+          omitted rather than printing a screenshot status for a feature
+          that isn't in play. */}
+      {config.screenshots && (
+        <p className="r3wr-shot-note" {...TAG}>
+          {shotState === "pending" ? (
+            <>
+              <span className="r3wr-spin" {...TAG} aria-hidden="true" />
+              Capturing a screenshot…
+            </>
+          ) : shotState === "done" ? (
+            "Screenshot attached."
+          ) : shotState === "unavailable" ? (
+            "Screenshot captured, but couldn't be saved — submitting without one."
+          ) : (
+            "No screenshot — submitting without one."
+          )}
+        </p>
+      )}
 
       {needsPassword && (
         <PasswordForm

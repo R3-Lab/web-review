@@ -57,14 +57,20 @@ function makeAdapter() {
     addComment: vi.fn(),
     setStatus: vi.fn(),
     unlock: vi.fn(() => Promise.resolve()),
+    // Present by default so `resolveConfig`'s `screenshots` resolves `true`
+    // and the shot-note tests below exercise the note's real gating, not a
+    // config that already suppresses it. Tests for the "no `uploadScreenshot`
+    // at all" case build their own adapter without this key.
+    uploadScreenshot: vi.fn(),
   };
 }
 
 function renderComposer(
   propsOverride: Partial<ComposerRenderProps> = {},
   configOverride: Omit<Partial<ReviewConfig>, "adapter"> = {},
+  adapterOverride: Partial<ReturnType<typeof makeAdapter>> = {},
 ) {
-  const adapter = makeAdapter();
+  const adapter = { ...makeAdapter(), ...adapterOverride };
   const config = resolveConfig({ adapter, ...configOverride });
   const onCancel = vi.fn();
   const onSubmit = vi.fn(() => Promise.resolve());
@@ -140,7 +146,7 @@ describe("Composer", () => {
     expect(screen.queryByLabelText(/your name/i)).not.toBeInTheDocument();
   });
 
-  it("reflects each shotState", () => {
+  it("reflects each shotState, when screenshots are enabled", () => {
     renderComposer({ shotState: "pending" });
     expect(screen.getByText(/capturing a screenshot/i)).toBeInTheDocument();
     cleanup();
@@ -155,6 +161,31 @@ describe("Composer", () => {
 
     renderComposer({ shotState: "error" });
     expect(screen.getByText(/submitting without one/i)).toBeInTheDocument();
+  });
+
+  // WP25 / defect 1: `adapter.uploadScreenshot` resolving `null` is a
+  // documented, supported outcome (storage failed, or none configured) —
+  // NOT the same as a screenshot actually being attached. The composer must
+  // never claim otherwise for that outcome.
+  it('never claims "attached" for shotState "unavailable" (uploadScreenshot resolved null) — it says so honestly instead', () => {
+    renderComposer({ shotState: "unavailable" });
+    expect(screen.queryByText(/screenshot attached/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/screenshot/i)).toBeInTheDocument();
+    // Distinct from the plain "no screenshot" copy used for idle/error — a
+    // capture WAS attempted here, only the storage step didn't happen.
+    expect(screen.getByText(/couldn't be saved/i)).toBeInTheDocument();
+  });
+
+  it("suppresses the screenshot note entirely when the adapter has no uploadScreenshot at all — even if shotState somehow claims done", () => {
+    renderComposer({ shotState: "done" }, {}, { uploadScreenshot: undefined });
+    expect(screen.queryByText(/screenshot attached/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
+  });
+
+  it("suppresses the screenshot note entirely when the consumer explicitly disabled screenshots — even if shotState somehow claims done", () => {
+    renderComposer({ shotState: "done" }, { screenshots: false });
+    expect(screen.queryByText(/screenshot attached/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/screenshot/i)).not.toBeInTheDocument();
   });
 
   it("on a 401 from onSubmit, shows the password field, then retries submit after unlock without losing the draft", async () => {
