@@ -23,6 +23,7 @@ import type { ComposerRenderProps } from "./overlay-root";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function makeAnchor(overrides: Partial<Anchor> = {}): Anchor {
@@ -80,6 +81,9 @@ function renderComposer(
     config,
     identity: null,
     shotState: "idle",
+    // `true` by default: this is the composer's normal condition — see
+    // `panelOpen`'s doc comment on `ComposerRenderProps`.
+    panelOpen: true,
     onCancel,
     onSubmit,
     onUnlocked,
@@ -214,5 +218,89 @@ describe("Composer", () => {
     await waitFor(() => expect(onUnlocked).toHaveBeenCalledTimes(1));
     // Retried automatically — the reviewer never had to click "Add feedback" again.
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+  });
+});
+
+// WP21 / defect 2: the composer's position clamp must account for the open
+// panel (horizontal) and the composer's own real rendered height
+// (vertical) — not a stale 160px guess. jsdom has no layout engine
+// (`getBoundingClientRect` returns zeros unless stubbed — see
+// `../anchor.test.ts` / `./overlay-root.test.tsx` for the same established
+// pattern), so the composer's own box is stubbed here to a realistic size
+// and everything else is left at jsdom's zero default.
+describe("position clamping at a normal 1280px viewport (WP21)", () => {
+  function stubViewport(width: number, height: number) {
+    vi.stubGlobal("innerWidth", width);
+    vi.stubGlobal("innerHeight", height);
+  }
+
+  /** Only `.r3wr-composer` itself (the dialog root) gets a real size; every other div stays at jsdom's zero default, same as an un-stubbed test. */
+  function stubComposerBox(width: number, height: number) {
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLDivElement,
+    ) {
+      const isComposer = this.classList.contains("r3wr-composer");
+      const w = isComposer ? width : 0;
+      const h = isComposer ? height : 0;
+      return { x: 0, y: 0, width: w, height: h, top: 0, left: 0, right: w, bottom: h, toJSON() {} };
+    });
+  }
+
+  it("keeps the composer clear of the open panel for a right-side pin", () => {
+    stubViewport(1280, 800);
+    // Short box — isolates this test to the HORIZONTAL clamp; the vertical
+    // one is covered by the bottom-of-page test below.
+    stubComposerBox(336, 300);
+
+    renderComposer({
+      anchor: makeAnchor({
+        rect: { x: 1000, y: 100, w: 100, h: 40 },
+        offsetPct: { x: 0.5, y: 0.5 },
+      }),
+      panelOpen: true,
+    });
+
+    const dialog = screen.getByRole("dialog");
+    const left = parseFloat(dialog.style.left);
+    const COMPOSER_WIDTH = 336; // min(336, 1280 - 16)
+    const PANEL_WIDTH = 384; // .r3wr-panel's docked width: min(384, 0.94 * 1280)
+
+    // The composer's own right edge must land at or before the panel's
+    // left edge — never underneath it. Before the fix, this pin's captured
+    // position (past the 1280px viewport's horizontal midpoint) put the
+    // composer's right edge at 1272px — deep under the panel, which starts
+    // at 896px — because the clamp had no idea the panel existed.
+    expect(left + COMPOSER_WIDTH).toBeLessThanOrEqual(1280 - PANEL_WIDTH);
+    expect(screen.getByRole("button", { name: /add feedback/i })).toBeInTheDocument();
+  });
+
+  it("keeps the composer's own bottom edge inside the viewport for a bottom-of-page pin", () => {
+    stubViewport(1280, 800);
+    // A realistic composer height per the WP21 bug report (category picker
+    // + title + comment + name + shot note + actions runs ~450-550px) —
+    // more than triple the old flat 160px headroom guess.
+    const REALISTIC_HEIGHT = 520;
+    stubComposerBox(336, REALISTIC_HEIGHT);
+
+    renderComposer({
+      anchor: makeAnchor({
+        // Deep down a tall page — well past what any headroom guess smaller
+        // than the real content height could safely place on-screen.
+        rect: { x: 100, y: 4000, w: 100, h: 40 },
+        offsetPct: { x: 0.5, y: 0.5 },
+      }),
+      panelOpen: true,
+    });
+
+    const dialog = screen.getByRole("dialog");
+    const top = parseFloat(dialog.style.top);
+
+    // `top + the composer's real height` must stay within the 800px-tall
+    // viewport — i.e. "Add feedback" is reachable. The old clamp only
+    // guaranteed `top <= innerHeight - 160`; for a 520px-tall composer that
+    // put the bottom (submit button included) at up to 1160px — 360px
+    // below the bottom of an 800px viewport, with no way to scroll to it.
+    expect(top + REALISTIC_HEIGHT).toBeLessThanOrEqual(800);
+    expect(screen.getByRole("button", { name: /add feedback/i })).toBeInTheDocument();
   });
 });

@@ -141,6 +141,17 @@ export interface ComposerRenderProps {
   identity: ReviewerIdentity | null;
   /** Lifecycle of the screenshot capture kicked off at pin-drop. */
   shotState: ShotState;
+  /**
+   * Whether `.r3wr-panel` is currently rendered alongside the composer —
+   * `enterPinDropMode` always opens it before a pin can be dropped, so this
+   * is normally `true` for a composer's whole lifetime, but a reviewer can
+   * close the panel via its own header button while the draft is still
+   * open, so the composer must read this rather than assume it. On a wide
+   * viewport the panel docks 384px along the right edge; the composer needs
+   * this to keep its own position (and the submit button in particular)
+   * from landing underneath it.
+   */
+  panelOpen: boolean;
   /** Dismiss the draft without creating a thread (also bound to Escape). */
   onCancel: () => void;
   /**
@@ -817,6 +828,7 @@ export function OverlayRoot({
             config,
             identity,
             shotState,
+            panelOpen,
             onCancel: cancelDraft,
             onSubmit: submitThread,
             onUnlocked,
