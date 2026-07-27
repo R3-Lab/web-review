@@ -1,0 +1,5 @@
+# Copied from the repo root by `prepublishOnly` so npm's always-included
+# README* picks it up when packing (npm includes README/LICENSE from the
+# package directory regardless of the `files` field). The root README.md
+# stays the single source of truth — this copy must never be committed.
+README.md

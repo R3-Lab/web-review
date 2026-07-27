@@ -1,6 +1,6 @@
 {
   "name": "@r3lab/web-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "In-page review overlay for React and Next.js apps: pin comments to any DOM element of a preview deployment, bring your own database.",
   "license": "MIT",
   "repository": {
@@ -94,7 +94,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "node -e \"require('fs').copyFileSync('../../README.md','README.md')\" && pnpm run build"
   },
   "peerDependenciesMeta": {
     "next": {
