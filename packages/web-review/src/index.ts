@@ -11,6 +11,18 @@
 // `./overlay/overlay-root` for the exact seam each one implements against —
 // and are exported here too, individually, for a consumer who wants to
 // override just one surface while reusing the others.
+//
+// That per-surface override is the whole reason those four are exported as
+// VALUES from this entry rather than left reachable only through the lazy
+// boundary — and it has a bundle-size cost (WP24/WP26, see README's "Bundle
+// cost"): each one imports `OVERLAY_ATTR` from `./anchor` directly to mark
+// its own DOM, so a consumer who imports anything else from this same entry
+// (this package's own demo app imports `createHttpAdapter` from it) ends up
+// with all four, and the anchoring engine behind them, in their eager
+// bundle under webpack — they don't tree-shake away just because a given
+// page never actually overrides a surface. The only confirmed way around
+// that today is importing `ReviewOverlay` from `@r3lab/web-review/next/client`
+// exclusively and sourcing everything else from elsewhere.
 
 export * from "./core/types";
 export * from "./core/adapter";

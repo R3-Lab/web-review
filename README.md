@@ -602,33 +602,48 @@ DOM node ever appears, and no request to `/api/review/*` is ever made (which
 code ever actually executed). The chunk's bytes can be downloaded without
 its code ever being called.
 
-**`resolveConfig` and the DOM-anchoring engine.** `resolveConfig` runs
-unconditionally on every render — before any gate check — and its default
-`urlKeyFromHref` used to be `normalizeUrl`, imported straight from
-`./anchor`. Since `anchor.ts` also exports the (much larger) DOM-anchoring
-engine — `OVERLAY_ATTR`, `captureAnchor`, `resolveAnchor`, `isStableClass`,
-and the rest — and is reachable both synchronously (through `resolveConfig`)
-and asynchronously (through the overlay's own lazy boundary), a bundler
-tends to keep it as one physical chunk visible to both sides, so the eager
-`resolveConfig` path pulled in the whole thing. `normalizeUrl` (plus its
-private helper) now lives in its own `src/normalize-url.ts`; `anchor.ts`
-still re-exports it, so nothing about the public API changes. Verified
-directly: `dist/next/client.js`'s own static import graph (`next/dynamic`
-excluded) is 3 files, ~4.6 KB total, with zero occurrences of
-`data-r3-review` (`OVERLAY_ATTR`'s value, a string literal that survives
-minification).
+**Caveat, main-entry importers (webpack, measured — not tested under
+Turbopack):** what actually ends up in a *disabled* build's always-loaded
+JS breaks into three pieces, with three different deferral stories:
 
-That fix is scoped to `resolveConfig`'s own edge, and a consumer who imports
-*only* `@r3lab/web-review/next/client` gets the benefit of it. It does
-**not** cover every eager edge into the main `.` entry: `Composer`, `Panel`,
-`ThreadDetail`, and `UnlockDialog` are also exported as values from the main
-entry (deliberately — see [Customizing a surface](#customizing-a-surface)),
-and each imports `OVERLAY_ATTR` directly to mark its own DOM. A consumer who
-imports anything else from the main entry alongside them — this package's
-own [demo app](examples/next-demo) imports `createHttpAdapter` from it —
-pulls that whole barrel in too, and `data-r3-review` still shows up in a
-`next build --webpack` bundle as a result (confirmed by building the demo's
-disabled variant). Tracked separately as a follow-up, not fixed here.
+1. **The anchoring engine (`captureAnchor`/`resolveAnchor`/`buildSelector`/
+   `scoreCandidate`/…, ~22 KB)** — genuinely deferred under `next build
+   --webpack`; downloaded-but-not-executed under Turbopack (the caveat
+   above).
+2. **The default UI surfaces (`Composer`/`Panel`/`ThreadDetail`/
+   `UnlockDialog`, ~10–16 KB combined)** — deferred *only* for a consumer who
+   imports exclusively from `@r3lab/web-review/next/client`. Measured
+   directly: a diagnostic build importing `ReviewOverlay` from
+   `@r3lab/web-review/next/client` alone, with `createHttpAdapter` swapped
+   for an inline stub (so nothing else touches the main `.` entry), produces
+   a 5,906-byte disabled-variant layout chunk with zero occurrences of
+   `data-r3-review`. As soon as anything else is imported from the main `.`
+   entry alongside `ReviewOverlay` — and this package's own [demo
+   app](examples/next-demo) does exactly that, importing `createHttpAdapter`
+   from it — these four surfaces are pulled in eagerly too, because each one
+   imports `OVERLAY_ATTR` directly to mark its own DOM, and they're exported
+   as values from that same main entry on purpose (see [Customizing a
+   surface](#customizing-a-surface)). This was only measured under webpack;
+   don't assume the Turbopack story is the same.
+3. **`resolveConfig` and `normalizeUrl` (~900 bytes)** — always eager, by
+   design: the mount gate itself calls `resolveConfig` before it knows
+   whether it's on, so this much has to run regardless. `normalizeUrl` used
+   to drag the entire anchoring engine in with it (piece 1) because it lived
+   inside `anchor.ts`; it now lives in its own `src/normalize-url.ts`,
+   re-exported from `anchor.ts` so the public API is unchanged. Verified
+   directly: `dist/next/client.js`'s own static import graph (`next/dynamic`
+   excluded) is 3 files, ~4.6 KB total, zero occurrences of `data-r3-review`.
+
+Net effect measured on the demo app's disabled variant, `next build
+--webpack`: the `resolveConfig` fix (piece 3) is real and independently
+verified, but the demo's own `app/layout-*.js` didn't shrink from it —
+15,977 bytes before, 15,987 bytes after, `data-r3-review` present both
+times — because piece 2 dominates and isn't touched by that fix. If
+minimizing the disabled-state cost matters to you: import `ReviewOverlay`
+*only* from `@r3lab/web-review/next/client`, and construct your adapter
+(`createHttpAdapter` or your own) from a module that doesn't also import
+anything else off the main `.` entry. Piece 2 is tracked as a follow-up,
+not fixed here.
 
 ## Keyboard and accessibility
 
