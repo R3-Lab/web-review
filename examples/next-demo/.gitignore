@@ -1,5 +1,6 @@
 .next/
 .next-e2e-*/
+.next-shots/
 next-env.d.ts
 node_modules/
 .env

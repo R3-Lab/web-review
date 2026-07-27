@@ -11,7 +11,12 @@
     "typecheck": "pnpm -F @r3lab/web-review typecheck",
     "lint": "pnpm -F @r3lab/web-review lint",
     "dev": "pnpm -F @r3lab/web-review dev",
-    "e2e": "pnpm -F next-demo e2e"
+    "e2e": "pnpm -F next-demo e2e",
+    "screenshots": "bash scripts/screenshots.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "pg": "^8.22.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
