@@ -664,15 +664,54 @@ JS breaks into three pieces, with three different deferral stories:
    directly: a diagnostic build importing `ReviewOverlay` from
    `@r3lab/web-review/next/client` alone, with `createHttpAdapter` swapped
    for an inline stub (so nothing else touches the main `.` entry), produces
-   a 5,906-byte disabled-variant layout chunk with zero occurrences of
+   a 5,864-byte disabled-variant layout chunk with zero occurrences of
    `data-r3-review`. As soon as anything else is imported from the main `.`
    entry alongside `ReviewOverlay` — and this package's own [demo
    app](examples/next-demo) does exactly that, importing `createHttpAdapter`
-   from it — these four surfaces are pulled in eagerly too, because each one
-   imports `OVERLAY_ATTR` directly to mark its own DOM, and they're exported
-   as values from that same main entry on purpose (see [Customizing a
-   surface](#customizing-a-surface)). This was only measured under webpack;
-   don't assume the Turbopack story is the same.
+   from it — these four surfaces (and the whole anchoring engine, piece 1)
+   are pulled in eagerly too: the layout chunk grows to 15,990 bytes with
+   `data-r3-review` present.
+
+   **Root cause, investigated (WP31) and confirmed — not tsup/esbuild
+   chunking.** The leading hypothesis going in was that tsup's own
+   chunk-splitting put these surfaces in the same pre-bundled chunk as
+   `createHttpAdapter`, so a consumer's bundler had no chunk boundary left to
+   split on. That's ruled out: `createHttpAdapter` is inlined directly into
+   `dist/index.js` itself (grep `dist/index.js` for `src/client/http-adapter.ts`
+   — it's not imported from any `chunk-*.js` file at all), so it was never
+   sharing a chunk with anything. The real mechanism is `dist/index.js`'s own
+   `"use client"` directive (required — see the constraints above) combined
+   with how Next.js's webpack integration handles any `"use client"` module:
+   Next's `next-flight-client-entry-loader` walks the module graph from every
+   Server Component, and for **every** file it finds carrying `"use client"`
+   — not just the one a Server Component imports directly, but every such
+   file reachable transitively, which includes `dist/index.js` itself —
+   it generates a client-reference entry that explicitly re-exports **all**
+   of that file's named exports (`registerClientReference` wraps each one;
+   see `next-flight-loader/index.ts` in the Next.js source). That generated
+   entry is what a normal bundler's used-exports analysis sees, and it
+   references every name unconditionally — so whether `review-mount.tsx`
+   itself ever writes `Composer` or `OVERLAY_ATTR` is irrelevant; Next
+   forces the whole export list live before webpack's own tree-shaking ever
+   gets a say. `sideEffects: ["*.css"]` in `package.json` doesn't help here
+   either, because this isn't a whole-module side-effect question — it's
+   Next materializing a use for every individual export.
+
+   Confirmed empirically, isolated from any chunking change: temporarily
+   trimming `src/index.ts`'s own `export *` list down to only what
+   `review-mount.tsx` actually uses (`createHttpAdapter`, the `ReviewConfig`
+   type, `ReviewOverlay`) — with `tsup.config.ts` completely untouched —
+   dropped the same disabled-variant layout chunk from 15,990 bytes to 8,073
+   bytes and made `data-r3-review` disappear, with no chunking change
+   involved at all. That isolates the lever precisely: it's what
+   `dist/index.js` **exports**, not how tsup groups the implementation
+   behind those exports. Fixing this the rest of the way means shrinking
+   `dist/index.js`'s own export surface (moving the four surfaces, and/or
+   the anchoring engine's direct exports, off the `"use client"` main entry)
+   — an API-shape change, out of scope for this investigation; see
+   [Customizing a surface](#customizing-a-surface) for the current
+   workaround. This was only measured under webpack; don't assume the
+   Turbopack story is the same.
 3. **`resolveConfig` and `normalizeUrl` (~900 bytes)** — always eager, by
    design: the mount gate itself calls `resolveConfig` before it knows
    whether it's on, so this much has to run regardless. `normalizeUrl` used
