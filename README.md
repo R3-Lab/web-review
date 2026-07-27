@@ -292,8 +292,8 @@ export function App() {
 
 ## Customizing a surface
 
-`ReviewOverlay` is the only mount point this package exports as a value.
-`OverlayRoot` (its internal shell) is exported as **types only**
+`ReviewOverlay` is the only mount point the main `.` entry exports as a
+value. `OverlayRoot` (its internal shell) is exported as **types only**
 (`OverlayRootProps`, `ComposerRenderProps`, `PanelRenderProps`,
 `UnlockRenderProps`, `ShotState`) — `import { OverlayRoot }` will not
 compile, deliberately: `ReviewOverlay` owns the mount gate and the lazy-load
@@ -301,8 +301,13 @@ boundary (see [Bundle cost](#bundle-cost)), and there's no supported way to
 render the shell outside of it.
 
 The four default UI surfaces — `Composer`, `Panel`, `ThreadDetail`,
-`UnlockDialog` — **are** exported as values, so you can replace just one and
-keep the rest stock via `renderComposer`/`renderPanel`/`renderUnlockDialog`:
+`UnlockDialog` — **are** exported as values, from **`@r3lab/web-review/surfaces`**
+— a separate subpath from `.`, not the main entry — so you can replace just
+one and keep the rest stock via `renderComposer`/`renderPanel`/`renderUnlockDialog`.
+Replacing one doesn't require importing the others at all: leave a `render*`
+prop unset and `ReviewOverlay` wires in its own stock default for it, same as
+always. The subpath split exists purely for bundle size — see
+[Bundle cost](#bundle-cost) — not because the customization story changed.
 
 <img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/composer.png" width="493" alt="The default Composer surface: a category picker for Design, Copy, Bug, and Other, plus title, comment, and name fields.">
 
@@ -320,7 +325,9 @@ import { MyBrandedComposer } from "./my-branded-composer";
 ```
 
 `props` is typed `ComposerRenderProps` (or `PanelRenderProps` /
-`UnlockRenderProps` for the other two) — import the type to build a
+`UnlockRenderProps` for the other two) — imported from the main `.` entry
+like any other type (types are erased at compile time, so they carry none of
+the bundle-size cost that moved the surfaces themselves off `.`) — to build a
 component against the exact contract `OverlayRoot` calls it with. A
 replaced surface receives the **same** props `OverlayRoot` passes the stock
 one — the same `onSubmit`/`onCancel` for the composer, `onReply`/
@@ -329,6 +336,33 @@ for the unlock dialog. A custom surface has to call those to actually drive
 the overlay's state machine; skip them and you get a form that looks right
 and does nothing — creating a thread, replying, or resolving only happens
 because the render prop was invoked, not because the surface merely rendered.
+
+Wrapping a stock surface (rather than replacing it outright) is just as
+supported — import the value from `./surfaces` alongside the type from `.`:
+
+```tsx
+import { createHttpAdapter, ReviewOverlay } from "@r3lab/web-review";
+import type { ComposerRenderProps } from "@r3lab/web-review";
+import { Composer } from "@r3lab/web-review/surfaces";
+
+function MyBrandedComposer(props: ComposerRenderProps) {
+  return (
+    <div className="my-brand">
+      <Composer {...props} />
+    </div>
+  );
+}
+
+<ReviewOverlay
+  config={{ adapter: createHttpAdapter() }}
+  renderComposer={(props) => <MyBrandedComposer {...props} />}
+/>;
+```
+
+(Both samples above are checked against this package's own build output —
+`Composer`'s destructured parameter type in `dist/surfaces.d.ts` is
+`ComposerRenderProps`, so passing it straight through via `{...props}` and
+via `ComposerRenderProps` imported from `.` type-checks exactly as shown.)
 
 ## Bring your own storage
 
@@ -602,16 +636,17 @@ Measured from a clean `pnpm -F @r3lab/web-review build` (tsup 8.5.1,
 esbuild), ESM output, uncompressed:
 
 ```
-ESM dist/index.js                  6.32 KB
+ESM dist/index.js                  6.08 KB
 ESM dist/next/client.js             1.86 KB
-ESM dist/overlay-root-AKHEQ576.js  22.19 KB   (a separate chunk)
+ESM dist/surfaces.js                0.45 KB   (Composer/Panel/ThreadDetail/UnlockDialog re-exports)
+ESM dist/overlay-root-KYNT3AOQ.js  22.22 KB   (a separate chunk)
 ```
 
 `dist/index.js` (the main entry) and `dist/next/client.js` (the Next mount)
 each import a small shared loader (`loadWiredOverlayRoot`, ~1.75 KB, its own
 chunk) that wires the default composer/panel/unlock-dialog surfaces onto
 `OverlayRoot`. That loader's *own* imports of the ~22.7 KB overlay
-implementation — `overlay-root-AKHEQ576.js` plus the small composer/panel/
+implementation — `overlay-root-KYNT3AOQ.js` plus the small composer/panel/
 unlock-dialog chunks — sit inside the loader's async function body, reached
 through `React.lazy` (main entry) or `next/dynamic` (Next entry). Confirmed
 directly against the build output: neither `dist/index.js` nor
@@ -652,66 +687,75 @@ its code ever being called.
 
 **Caveat, main-entry importers (webpack, measured — not tested under
 Turbopack):** what actually ends up in a *disabled* build's always-loaded
-JS breaks into three pieces, with three different deferral stories:
+JS breaks into three pieces, with three different deferral stories.
 
 1. **The anchoring engine (`captureAnchor`/`resolveAnchor`/`buildSelector`/
-   `scoreCandidate`/…, ~22 KB)** — genuinely deferred under `next build
-   --webpack`; downloaded-but-not-executed under Turbopack (the caveat
-   above).
+   `scoreCandidate`/…, ~22 KB source).** *Correction: this is NOT
+   unconditionally deferred under `next build --webpack` the way it was
+   previously described here* — that claim held only in isolation, not for
+   this package's own actual [demo app](examples/next-demo). `anchor.ts` and
+   `core/adapter.ts` (`ReviewApiError` and friends, needed eagerly by
+   `createHttpAdapter`, which throws it) end up bundled by tsup into the
+   *same* shared output chunk, because both are reachable from the identical
+   pair of places — the eager main entry and the lazy overlay chunk — and
+   esbuild's splitting merges same-reachability modules into one chunk file
+   rather than emitting two. A consumer who needs anything from that merged
+   chunk downloads the whole file, anchoring engine included: confirmed
+   directly against the demo's real webpack output (not just tsup's
+   intermediate chunk) — `isStableClass`'s own regex literal
+   (`/__[A-Za-z0-9]{4,}$/`) and `buildSelector`'s `:nth-of-type` selector
+   string both appear verbatim in the disabled-variant `app/layout-*.js`,
+   which nothing in `review-mount.tsx` or `layout.tsx` calls, directly or
+   indirectly. This predates and is independent of the fix in piece 2 below
+   — moving the four UI surfaces off the main entry doesn't touch it, and
+   confirmed unchanged before and after that fix. Not fixed here; the
+   downloaded-but-not-executed story under Turbopack (the caveat above)
+   still holds regardless, since that's about execution, not download.
 2. **The default UI surfaces (`Composer`/`Panel`/`ThreadDetail`/
-   `UnlockDialog`, ~10–16 KB combined)** — deferred *only* for a consumer who
-   imports exclusively from `@r3lab/web-review/next/client`. Measured
-   directly: a diagnostic build importing `ReviewOverlay` from
-   `@r3lab/web-review/next/client` alone, with `createHttpAdapter` swapped
-   for an inline stub (so nothing else touches the main `.` entry), produces
-   a 5,864-byte disabled-variant layout chunk with zero occurrences of
-   `data-r3-review`. As soon as anything else is imported from the main `.`
-   entry alongside `ReviewOverlay` — and this package's own [demo
-   app](examples/next-demo) does exactly that, importing `createHttpAdapter`
-   from it — these four surfaces (and the whole anchoring engine, piece 1)
-   are pulled in eagerly too: the layout chunk grows to 15,990 bytes with
-   `data-r3-review` present.
+   `UnlockDialog`).** **Fixed** — moved off the main `.` entry onto their own
+   `@r3lab/web-review/surfaces` subpath; see [Customizing a
+   surface](#customizing-a-surface) for how to import them there. Measured on
+   the same demo app, real usage unchanged (`review-mount.tsx` still imports
+   `createHttpAdapter` from `.` and `ReviewOverlay` from `.../next/client`):
+   the disabled-variant layout chunk drops from **15,990 to 12,841 bytes**
+   (about 20%) — real, verified, and it stays that way whether or not a
+   consumer ever imports `@r3lab/web-review/surfaces` at all, since only an
+   actual import from that subpath pays for it now.
 
-   **Root cause, investigated (WP31) and confirmed — not tsup/esbuild
-   chunking.** The leading hypothesis going in was that tsup's own
-   chunk-splitting put these surfaces in the same pre-bundled chunk as
-   `createHttpAdapter`, so a consumer's bundler had no chunk boundary left to
-   split on. That's ruled out: `createHttpAdapter` is inlined directly into
-   `dist/index.js` itself (grep `dist/index.js` for `src/client/http-adapter.ts`
-   — it's not imported from any `chunk-*.js` file at all), so it was never
-   sharing a chunk with anything. The real mechanism is `dist/index.js`'s own
+   *Root cause, investigated and confirmed — not tsup/esbuild chunking.* The
+   leading hypothesis going in was that tsup's own chunk-splitting put these
+   surfaces in the same pre-bundled chunk as `createHttpAdapter`, so a
+   consumer's bundler had no chunk boundary left to split on. That's ruled
+   out: `createHttpAdapter` is inlined directly into `dist/index.js` itself
+   (grep `dist/index.js` for `src/client/http-adapter.ts` — it's not
+   imported from any `chunk-*.js` file at all), so it was never sharing a
+   chunk with anything. The real mechanism is `dist/index.js`'s own
    `"use client"` directive (required — see the constraints above) combined
    with how Next.js's webpack integration handles any `"use client"` module:
    Next's `next-flight-client-entry-loader` walks the module graph from every
    Server Component, and for **every** file it finds carrying `"use client"`
    — not just the one a Server Component imports directly, but every such
-   file reachable transitively, which includes `dist/index.js` itself —
-   it generates a client-reference entry that explicitly re-exports **all**
-   of that file's named exports (`registerClientReference` wraps each one;
-   see `next-flight-loader/index.ts` in the Next.js source). That generated
-   entry is what a normal bundler's used-exports analysis sees, and it
-   references every name unconditionally — so whether `review-mount.tsx`
-   itself ever writes `Composer` or `OVERLAY_ATTR` is irrelevant; Next
-   forces the whole export list live before webpack's own tree-shaking ever
-   gets a say. `sideEffects: ["*.css"]` in `package.json` doesn't help here
-   either, because this isn't a whole-module side-effect question — it's
-   Next materializing a use for every individual export.
+   file reachable transitively, which included `dist/index.js` itself — it
+   generates a client-reference entry that explicitly re-exports **all** of
+   that file's named exports (`registerClientReference` wraps each one; see
+   `next-flight-loader/index.ts` in the Next.js source). That generated entry
+   is what a normal bundler's used-exports analysis sees, and it references
+   every name unconditionally — so whether `review-mount.tsx` itself ever
+   wrote `Composer` was irrelevant; Next forced the whole export list live
+   before webpack's own tree-shaking ever got a say. `sideEffects: ["*.css"]`
+   in `package.json` doesn't help here either, because this isn't a
+   whole-module side-effect question — it's Next materializing a use for
+   every individual export. Confirmed empirically, isolated from any
+   chunking change: temporarily trimming `src/index.ts`'s own `export *`
+   list, with `tsup.config.ts` completely untouched, reproduced the same
+   drop with no chunking change involved at all — that isolated the lever
+   precisely (what `dist/index.js` **exports**, not how tsup groups the
+   implementation behind those exports) and is what motivated giving the
+   four surfaces their own subpath instead.
 
-   Confirmed empirically, isolated from any chunking change: temporarily
-   trimming `src/index.ts`'s own `export *` list down to only what
-   `review-mount.tsx` actually uses (`createHttpAdapter`, the `ReviewConfig`
-   type, `ReviewOverlay`) — with `tsup.config.ts` completely untouched —
-   dropped the same disabled-variant layout chunk from 15,990 bytes to 8,073
-   bytes and made `data-r3-review` disappear, with no chunking change
-   involved at all. That isolates the lever precisely: it's what
-   `dist/index.js` **exports**, not how tsup groups the implementation
-   behind those exports. Fixing this the rest of the way means shrinking
-   `dist/index.js`'s own export surface (moving the four surfaces, and/or
-   the anchoring engine's direct exports, off the `"use client"` main entry)
-   — an API-shape change, out of scope for this investigation; see
-   [Customizing a surface](#customizing-a-surface) for the current
-   workaround. This was only measured under webpack; don't assume the
-   Turbopack story is the same.
+   The remaining gap down to the floor (see below) is piece 1, above — a
+   separate, still-open issue this fix doesn't touch. This was only measured
+   under webpack; don't assume the Turbopack story is the same.
 3. **`resolveConfig` and `normalizeUrl` (~900 bytes)** — always eager, by
    design: the mount gate itself calls `resolveConfig` before it knows
    whether it's on, so this much has to run regardless. `normalizeUrl` used
@@ -721,16 +765,26 @@ JS breaks into three pieces, with three different deferral stories:
    directly: `dist/next/client.js`'s own static import graph (`next/dynamic`
    excluded) is 3 files, ~4.6 KB total, zero occurrences of `data-r3-review`.
 
+**Floor, for reference:** a diagnostic build importing `ReviewOverlay` from
+`@r3lab/web-review/next/client` alone, with `createHttpAdapter` swapped for
+an inline stub (so nothing else touches the main `.` entry at all — no
+`core/adapter.ts`, hence no anchor-engine chunk-share either), produces a
+5,864-byte disabled-variant layout chunk with zero occurrences of
+`data-r3-review`. That's the true floor, not a target this fix reaches:
+importing `createHttpAdapter` from `.` is normal, expected usage, and piece
+1's chunk-share means that alone still costs real bytes today.
+
 Net effect measured on the demo app's disabled variant, `next build
---webpack`: the `resolveConfig` fix (piece 3) is real and independently
-verified, but the demo's own `app/layout-*.js` didn't shrink from it —
-15,977 bytes before, 15,987 bytes after, `data-r3-review` present both
-times — because piece 2 dominates and isn't touched by that fix. If
-minimizing the disabled-state cost matters to you: import `ReviewOverlay`
-*only* from `@r3lab/web-review/next/client`, and construct your adapter
-(`createHttpAdapter` or your own) from a module that doesn't also import
-anything else off the main `.` entry. Piece 2 is tracked as a follow-up,
-not fixed here.
+--webpack`, real usage unchanged throughout (`review-mount.tsx` importing
+`createHttpAdapter` from `.` and `ReviewOverlay` from `.../next/client`):
+**15,990 bytes before this package's own fixes → 12,841 bytes after piece
+2's fix**, `data-r3-review` present in both (piece 1 keeps it there — see
+above). If minimizing the disabled-state cost matters to you today: import
+`ReviewOverlay` *only* from `@r3lab/web-review/next/client`, and construct
+your adapter (`createHttpAdapter` or your own) from a module that doesn't
+also import anything else off the main `.` entry — that's the only
+confirmed way to reach the floor above. Piece 1 (the anchor/adapter
+chunk-share) is tracked as a follow-up, not fixed here.
 
 ## Keyboard and accessibility
 
