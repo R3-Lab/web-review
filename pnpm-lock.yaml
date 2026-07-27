@@ -6,7 +6,14 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.62.0
+        version: 1.62.0
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
 
   examples/next-demo:
     dependencies:
