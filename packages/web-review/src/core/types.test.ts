@@ -213,8 +213,8 @@ describe("ReviewApiError helpers", () => {
 
     // The defect this guards against: `not_found` (an unknown/malformed
     // thread id — see `src/next/routes.ts`) must NOT be treated as the
-    // feature being disabled, even though both are 404s. Before WP19, this
-    // package's only 404 code WAS `not_found`, which made this
+    // feature being disabled, even though both are 404s. This package used
+    // to have only one 404 code, `not_found`, which made this
     // indistinguishable from the kill switch — see `isFeatureDisabled`'s
     // doc comment in `./adapter` and `src/next/routes.test.ts`'s "404 code
     // discrimination" suite for the end-to-end regression proof.

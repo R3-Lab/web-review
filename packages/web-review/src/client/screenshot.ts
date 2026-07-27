@@ -17,8 +17,8 @@
  * error. tsup's `external: ["@zumer/snapdom"]` (see `tsup.config.ts`) then
  * leaves that dynamic `import()` call as-is in the bundle rather than
  * inlining the dependency, so it stays a real runtime import, not a
- * bundle-time one — see the package README / WP3 report for the `grep`
- * proving no static import survives into `dist/`.
+ * bundle-time one — `build-output.test.ts` greps `dist/` to prove no static
+ * import of `@zumer/snapdom` survives the build.
  *
  * We deliberately do NOT rasterize the whole document and crop to a
  * viewport region: snapdom re-renders a DOM clone whose layout can reflow

@@ -5,8 +5,8 @@
 // adapter used to mount the overlay in a consuming app. `ReviewOverlay` is
 // the mount gate a consumer's layout imports; it renders nothing until
 // switched on, and its shell (pins, highlights, drift, keyboard handling,
-// polling — WP4a) lazy-loads behind it. `Composer`, `Panel`, `ThreadDetail`,
-// and `UnlockDialog` (WP4b) are wired in as `ReviewOverlay`'s defaults for
+// polling) lazy-loads behind it. `Composer`, `Panel`, `ThreadDetail`, and
+// `UnlockDialog` are wired in as `ReviewOverlay`'s defaults for
 // `renderComposer` / `renderPanel` / `renderUnlockDialog` — see
 // `./overlay/overlay-root` for the exact seam each one implements against —
 // and are exported here too, individually, for a consumer who wants to
@@ -14,8 +14,8 @@
 //
 // That per-surface override is the whole reason those four are exported as
 // VALUES from this entry rather than left reachable only through the lazy
-// boundary — and it has a bundle-size cost (WP24/WP26, see README's "Bundle
-// cost"): each one imports `OVERLAY_ATTR` from `./anchor` directly to mark
+// boundary — and it has a bundle-size cost (see the README's "Bundle cost"
+// section): each one imports `OVERLAY_ATTR` from `./anchor` directly to mark
 // its own DOM, so a consumer who imports anything else from this same entry
 // (this package's own demo app imports `createHttpAdapter` from it) ends up
 // with all four, and the anchoring engine behind them, in their eager

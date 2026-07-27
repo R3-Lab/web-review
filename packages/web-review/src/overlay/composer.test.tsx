@@ -3,7 +3,7 @@
  *
  * Renders `Composer` directly against a minimal `ComposerRenderProps` fixture
  * — no `OverlayRoot` involved — so these tests exercise exactly the seam
- * WP4b implements against (`./overlay-root`'s `ComposerRenderProps`) in
+ * `Composer` implements against (`./overlay-root`'s `ComposerRenderProps`) in
  * isolation. The full pin → composer → panel round trip through the real
  * seam lives in `./panels-integration.test.tsx`.
  */

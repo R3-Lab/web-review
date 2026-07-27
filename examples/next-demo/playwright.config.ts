@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { DATABASE_URL, DISABLED_PORT, ENABLED_PORT, REVIEW_PASSWORD, REVIEW_SECRET } from "./e2e/constants";
 
 /**
- * E2E config (WP11) — deliberately separate from the package's own
+ * E2E config — deliberately separate from the package's own
  * `vitest.config.ts`, never run by `pnpm -F @r3lab/web-review test`.
  * `scripts/e2e.sh` (via `pnpm e2e`) brings up a real, uniquely-named
  * Postgres container, applies the package's own `sql/postgres.sql`, and —

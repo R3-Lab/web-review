@@ -1,7 +1,6 @@
 /**
- * Scenario 8 — disabled overlay never executes (WP22: re-scoped after
- * confirming what Next.js + Turbopack actually guarantees vs. what it
- * doesn't).
+ * Scenario 8 — disabled overlay never executes. Scoped deliberately to what
+ * Next.js + Turbopack actually guarantee, not more (see below).
  *
  * Runs against the SEPARATE build in the "disabled" Playwright project
  * (`NEXT_PUBLIC_REVIEW_ENABLED` unset — see `playwright.config.ts`'s second

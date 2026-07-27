@@ -20,14 +20,13 @@
  *    glyph (see `icons.tsx`). Status is orthogonal and encoded by FORM
  *    (filled = open, outlined = resolved), so the two axes never collide.
  *
- * WP4a (this file, as shipped) covers: root layout + design tokens, the
- * pin-drop toggle, the capture scrim/hint, pins + the draft marker,
- * highlights + the hover-to-select preview, and the screen-reader-only live
- * region. WP4b ADDS (not yet in this file): the side panel, thread cards,
- * thread detail, composer/field/button primitives, the category picker, the
- * spinner, the narrow-screen bottom-sheet layout, and the `afb-pop`/
- * `afb-slide-in`/`afb-sheet-in` keyframes those surfaces animate with — see
- * the report for the exact list.
+ * This file covers: root layout + design tokens, the pin-drop toggle, the
+ * capture scrim/hint, pins + the draft marker, highlights + the
+ * hover-to-select preview, and the screen-reader-only live region — the
+ * overlay's shell — plus the side panel, thread cards, thread detail,
+ * composer/field/button primitives, the category picker, the spinner, the
+ * narrow-screen bottom-sheet layout, and the `afb-pop`/`afb-slide-in`/
+ * `afb-sheet-in` keyframes those surfaces animate with.
  */
 
 .r3wr-root,
@@ -82,7 +81,7 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Reviewer-authored prose and quoted copy (WP4b's thread cards / composer)
+/* Reviewer-authored prose and quoted copy (thread cards / composer)
    read in a plain system sans, so a comment can never be mistaken for page
    content. Declared here since it rides on the same root tokens. */
 .r3wr-root .r3wr-prose {
@@ -430,7 +429,7 @@ body.r3wr-picking {
   }
 }
 
-/* ═══════════════════════════ WP4b: panel surfaces ═══════════════════════════
+/* ═══════════════════════════ Panel surfaces ══════════════════════════════
  * Side panel, thread cards, thread detail, composer/field/button primitives,
  * the category picker, the spinner, and the narrow-screen bottom-sheet
  * layout. Ported from the same reference's `feedback-overlay.css`
@@ -935,7 +934,7 @@ body.r3wr-picking {
   animation: r3wr-rot 0.7s linear infinite;
 }
 
-/* ── Keyframes WP4b adds ─────────────────────────────────────────────────── */
+/* ── Keyframes the panel surfaces add ────────────────────────────────────── */
 @keyframes r3wr-rot {
   to {
     transform: rotate(360deg);
@@ -962,7 +961,8 @@ body.r3wr-picking {
 
 /* Reduced motion: the spinner becomes a static ring instead of spinning
    forever. A second block rather than folding into the one above, since
-   this file appends WP4b's rules after WP4a's own reduced-motion block. */
+   the panel-surface rules are appended after the shell's own reduced-motion
+   block earlier in this file. */
 @media (prefers-reduced-motion: reduce) {
   .r3wr-root .r3wr-spin {
     animation: none;
@@ -988,7 +988,7 @@ body.r3wr-picking {
     animation: r3wr-sheet-in var(--r3wr-t-in) both;
   }
   /* Only lift the launcher while the sheet is actually up. `data-panel-open`
-     is set by `OverlayRoot` on `.r3wr-root` itself (WP4a) — see that file's
+     is set by `OverlayRoot` on `.r3wr-root` itself — see `overlay-root.tsx`'s
      `<div className="r3wr-root" data-panel-open={panelOpen} ...>`. */
   .r3wr-root[data-panel-open="true"] .r3wr-toggle {
     bottom: calc(70vh + 12px);

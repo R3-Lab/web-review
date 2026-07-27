@@ -210,7 +210,7 @@ export interface ResolveResult {
  * the overlay displays; `color` is an optional accent for the pin/badge.
  *
  * Deliberately has no icon field, and this package takes no icon-library
- * dependency: the overlay (a later work package) ships inline SVGs keyed
+ * dependency: the overlay (`../overlay/icons.tsx`) ships inline SVGs keyed
  * off the four {@link DEFAULT_CATEGORIES} ids, falling back to a generic
  * mark for custom ids a consumer defines.
  */

@@ -6,8 +6,8 @@
 // server components, middleware.
 //
 // SERVER/CLIENT SPLIT — read before adding an export here. This package's
-// browser-side overlay mount (a later work package, WP5) lives on its own
-// subpath, `@r3lab/web-review/next/client` (`./client.ts`), which carries a
+// browser-side overlay mount lives on its own subpath,
+// `@r3lab/web-review/next/client` (`./client.ts`), which carries a
 // `"use client"` directive. The two are kept on separate subpaths rather
 // than combined in one `./next` entry because:
 //

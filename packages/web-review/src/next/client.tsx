@@ -51,9 +51,9 @@
  * var) are applied — two independent `useSyncExternalStore` subscriptions to
  * the same localStorage key, with all the drift risk that implies. Instead,
  * this file owns ONE gate (mirroring `ReviewOverlay`'s exactly, plus the env
- * var) in front of ONE lazy boundary — that boundary is the one the brief
- * asks for. What that boundary loads is covered below, in "Default
- * surfaces".
+ * var) in front of ONE lazy boundary — the one that actually satisfies "use
+ * `next/dynamic` for the overlay chunk". What that boundary loads is
+ * covered below, in "Default surfaces".
  *
  * Three ways to switch it on, checked in this order — an explicit
  * `config.enabled` always wins (same precedent as `ResolvedReviewConfig.screenshots`
@@ -175,11 +175,11 @@ const DynamicOverlayRoot = dynamic(loadWiredOverlayRoot, { ssr: false });
 
 export interface ReviewOverlayProps {
   config: ReviewConfig;
-  /** See `ComposerRenderProps` in `../overlay/overlay-root` — WP4b's composer. */
+  /** See `ComposerRenderProps` in `../overlay/overlay-root` — the composer. */
   renderComposer?: (props: ComposerRenderProps) => ReactNode;
-  /** See `PanelRenderProps` in `../overlay/overlay-root` — WP4b's thread panel/detail. */
+  /** See `PanelRenderProps` in `../overlay/overlay-root` — the thread panel/detail. */
   renderPanel?: (props: PanelRenderProps) => ReactNode;
-  /** See `UnlockRenderProps` in `../overlay/overlay-root` — WP4b's unlock dialog. */
+  /** See `UnlockRenderProps` in `../overlay/overlay-root` — the unlock dialog. */
   renderUnlockDialog?: (props: UnlockRenderProps) => ReactNode;
 }
 
