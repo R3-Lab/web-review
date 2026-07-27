@@ -92,6 +92,14 @@ const THREAD_C = {
   name: "Priya Kapoor",
 };
 
+const THREAD_D = {
+  testId: "hero-image",
+  category: "Bug",
+  title: "Placeholder image shipping to prod?",
+  body: "Is this still the placeholder gradient, or is it a real illustration now? Just making sure this isn't the demo asset making it into the README.",
+  name: "Sara Lindqvist",
+};
+
 const COMPOSER_DRAFT = {
   testId: "cta-primary",
   category: "Bug",
@@ -102,7 +110,7 @@ const COMPOSER_DRAFT = {
 
 // Fixed, arbitrary-but-plausible past timestamps (UTC) — never "now" at run
 // time — so `formatTime`'s rendered text is byte-identical on every run.
-// Ordered so the panel's newest-first list reads A, B, C top to bottom.
+// Ordered so the panel's newest-first list reads A, D, B, C top to bottom.
 const SEED_TIMESTAMPS = {
   threadC: { created: "2026-01-08T17:14:00.000Z" },
   threadB: {
@@ -110,6 +118,7 @@ const SEED_TIMESTAMPS = {
     reply: "2026-01-10T23:30:00.000Z",
     resolved: "2026-01-10T23:31:00.000Z",
   },
+  threadD: { created: "2026-01-11T20:50:00.000Z" },
   threadA: { created: "2026-01-13T00:42:00.000Z" },
 };
 
@@ -120,6 +129,28 @@ function lockedToggle(page) {
 }
 function unlockedToggle(page) {
   return page.locator(".r3wr-toggle:not([data-locked])");
+}
+
+/**
+ * Zeroes every CSS animation/transition duration and delay on the page.
+ * `.r3wr-composer` (shared by `Composer` AND `UnlockDialog`) and `.r3wr-panel`
+ * mount with a 200ms `opacity: 0 → 1` (or slide/pop) entrance animation
+ * (overlay.css's `r3wr-pop`/`r3wr-slide-in`, both `animation-fill-mode:
+ * both`). `waitFor({ state: "visible" })` only waits for the element to have
+ * a non-zero box and be attached — it does NOT wait for CSS animations to
+ * finish, so a screenshot taken right after can land mid-fade (a washed-out,
+ * translucent-looking capture). Zeroing durations (not `animation: none`,
+ * which can skip a `both`-fill-mode animation's END state entirely) jumps
+ * straight to the settled final frame. Applied to every capture context, not
+ * just the ones that were visibly affected — a half-transitioned frame is
+ * exactly the kind of thing that can differ between runs even when it isn't
+ * obviously wrong to the eye.
+ */
+async function disableAnimations(page) {
+  await page.addStyleTag({
+    content:
+      "*, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition-duration: 0s !important; transition-delay: 0s !important; }",
+  });
 }
 
 async function unlock(page, password = REVIEW_PASSWORD) {
@@ -205,6 +236,7 @@ async function seed(browser) {
     const ctx = await browser.newContext(CONTEXT_OPTS);
     const page = await ctx.newPage();
     await page.goto(BASE_URL);
+    await disableAnimations(page);
     await unlock(page);
     await dropElementPin(page, page.getByTestId(THREAD_A.testId), THREAD_A);
     await ctx.close();
@@ -215,6 +247,7 @@ async function seed(browser) {
     const ctx = await browser.newContext(CONTEXT_OPTS);
     const page = await ctx.newPage();
     await page.goto(BASE_URL);
+    await disableAnimations(page);
     await unlock(page);
     await dropElementPin(page, page.getByTestId(THREAD_B.testId), THREAD_B);
     await ctx.close();
@@ -225,6 +258,7 @@ async function seed(browser) {
     const ctx = await browser.newContext(CONTEXT_OPTS);
     const page = await ctx.newPage();
     await page.goto(BASE_URL);
+    await disableAnimations(page);
     await unlock(page);
     await dropTextPin(page, page.getByTestId(THREAD_C.testId), THREAD_C.phrase, THREAD_C);
     await ctx.close();
@@ -235,6 +269,7 @@ async function seed(browser) {
     const ctx = await browser.newContext(CONTEXT_OPTS);
     const page = await ctx.newPage();
     await page.goto(BASE_URL);
+    await disableAnimations(page);
     await unlock(page);
     // Open the list (not the just-created thread) the same way
     // reply-resolve.spec.ts does: enter pin-drop mode, then Escape out of
@@ -255,6 +290,17 @@ async function seed(browser) {
 
     await detail.getByRole("button", { name: "Resolve", exact: true }).click();
     await detail.locator(".r3wr-status").waitFor({ state: "visible" });
+    await ctx.close();
+  }
+
+  console.log("==> Seeding Thread D (Sara Lindqvist, Bug, hero-image)");
+  {
+    const ctx = await browser.newContext(CONTEXT_OPTS);
+    const page = await ctx.newPage();
+    await page.goto(BASE_URL);
+    await disableAnimations(page);
+    await unlock(page);
+    await dropElementPin(page, page.getByTestId(THREAD_D.testId), THREAD_D);
     await ctx.close();
   }
 }
@@ -301,6 +347,16 @@ async function backdate() {
          where thread_id = (select id from review_thread where title = $2) and author_name = $3`,
       [SEED_TIMESTAMPS.threadC.created, THREAD_C.title, THREAD_C.name],
     );
+
+    await client.query(
+      `update review_thread set created_at = $1, updated_at = $1 where title = $2`,
+      [SEED_TIMESTAMPS.threadD.created, THREAD_D.title],
+    );
+    await client.query(
+      `update review_comment set created_at = $1
+         where thread_id = (select id from review_thread where title = $2) and author_name = $3`,
+      [SEED_TIMESTAMPS.threadD.created, THREAD_D.title, THREAD_D.name],
+    );
   } finally {
     await client.end();
   }
@@ -328,6 +384,7 @@ async function captureHero(browser) {
   const ctx = await browser.newContext(CONTEXT_OPTS);
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await disableAnimations(page);
   await unlock(page);
   // List, not composing — same "c then Escape" pattern as the reply/resolve
   // seed step above.
@@ -338,20 +395,28 @@ async function captureHero(browser) {
   // Default filter is "open" (see overlay-root.tsx) — Thread B is resolved,
   // so switch to "All" to show every thread, open and resolved alike.
   await list.getByRole("button", { name: "All", exact: true }).click();
-  await list.locator(".r3wr-thread").nth(2).waitFor({ state: "visible" }); // all three threads loaded
+  await list.locator(".r3wr-thread").nth(3).waitFor({ state: "visible" }); // all four threads loaded
 
   // Ends after the testimonial (not the CTA section further down) — still
-  // shows two pins (the feature-card pin and the text-anchored highlight)
-  // plus the full thread list, at a noticeably smaller file size than
-  // including the whole page.
+  // shows pins (the feature-card pin, the hero-image pin, the text-anchored
+  // highlight) plus the full thread list, at a noticeably smaller file size
+  // than including the whole page. Height is the taller of (a) the page
+  // content we want in frame and (b) the panel's actual last-thread bottom —
+  // with only 3 threads the panel content fell well short of the page-content
+  // height, leaving a large dead strip of empty panel below the list; a 4th
+  // thread plus taking the max of both bounds keeps the list looking used
+  // rather than sparse, without over- or under-cropping either side.
   const mainBox = await page.locator("main").boundingBox();
   const testimonialBox = await page.getByTestId("testimonial").boundingBox();
+  const lastThreadBox = await list.locator(".r3wr-thread").last().boundingBox();
   const left = Math.max(0, mainBox.x - 40);
+  const pageContentBottom = testimonialBox.y + testimonialBox.height;
+  const panelContentBottom = lastThreadBox.y + lastThreadBox.height;
   const clip = {
     x: left,
     y: 0,
     width: VIEWPORT.width - left,
-    height: Math.min(VIEWPORT.height, testimonialBox.y + testimonialBox.height + 48),
+    height: Math.min(VIEWPORT.height, Math.max(pageContentBottom, panelContentBottom) + 40),
   };
   await capture("hero", clip, page);
   await ctx.close();
@@ -361,6 +426,7 @@ async function captureComposer(browser) {
   const ctx = await browser.newContext(CONTEXT_OPTS);
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await disableAnimations(page);
   await unlock(page);
   await page.keyboard.press("c");
   await page.locator(".r3wr-capture-hint").waitFor({ state: "visible" });
@@ -379,13 +445,32 @@ async function captureComposer(browser) {
     .catch(() => {});
 
   const composerBox = await page.locator(".r3wr-composer").boundingBox();
-  const ctaBox = await page.getByTestId("cta").boundingBox();
-  const left = Math.max(0, Math.min(composerBox.x, ctaBox.x) - 40);
-  const top = Math.max(0, Math.min(composerBox.y, ctaBox.y) - 40);
-  const right = Math.min(VIEWPORT.width, Math.max(composerBox.x + composerBox.width, ctaBox.x + ctaBox.width) + 40);
+  // Union of the composer and the two buttons ONLY — not the `cta`
+  // section (heading + instruction paragraph + buttons) or even
+  // `.demo-cta` (the button row alone): both are BLOCK-level boxes that
+  // stretch to the full ~860px content column width by default regardless
+  // of their children's actual size, which either wasted the whole right
+  // half of the frame on dead background or, when only used for the right
+  // bound, truncated the instruction paragraph mid-sentence at that edge.
+  // The buttons themselves are the only elements sized to their own
+  // content, so bound tightly on those plus the composer and drop the
+  // heading/paragraph from the frame entirely — the open composer next to
+  // the buttons it's anchored to is self-explanatory without them.
+  const primaryBox = await page.getByTestId("cta-primary").boundingBox();
+  const secondaryBox = await page.getByTestId("cta-secondary").boundingBox();
+  const left = Math.max(0, Math.min(composerBox.x, primaryBox.x, secondaryBox.x) - 40);
+  // Only 16px of top padding, not 40: the buttons sit a mere 24px (`.demo-cta`'s
+  // `margin-top: 1.5rem`) below the instruction paragraph's own text line —
+  // 40px of padding reached back up INTO that line, showing a sliced-off
+  // sliver of "click an element below to" at the very top edge.
+  const top = Math.max(0, Math.min(composerBox.y, primaryBox.y, secondaryBox.y) - 16);
+  const right = Math.min(
+    VIEWPORT.width,
+    Math.max(composerBox.x + composerBox.width, secondaryBox.x + secondaryBox.width) + 40,
+  );
   const bottom = Math.min(
     VIEWPORT.height,
-    Math.max(composerBox.y + composerBox.height, ctaBox.y + ctaBox.height) + 40,
+    Math.max(composerBox.y + composerBox.height, secondaryBox.y + secondaryBox.height) + 40,
   );
   await capture("composer", { x: left, y: top, width: right - left, height: bottom - top }, page);
   await ctx.close();
@@ -395,6 +480,7 @@ async function captureTextAnchor(browser) {
   const ctx = await browser.newContext(CONTEXT_OPTS);
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await disableAnimations(page);
   await unlock(page);
   await page.locator('.r3wr-highlight[data-kind="text"]').waitFor({ state: "visible" });
 
@@ -413,6 +499,7 @@ async function captureThreadDetail(browser) {
   const ctx = await browser.newContext(CONTEXT_OPTS);
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await disableAnimations(page);
   await unlock(page);
   await page.keyboard.press("c");
   await page.keyboard.press("Escape");
@@ -442,6 +529,7 @@ async function captureUnlock(browser) {
   const ctx = await browser.newContext(CONTEXT_OPTS);
   const page = await ctx.newPage();
   await page.goto(BASE_URL);
+  await disableAnimations(page);
   await lockedToggle(page).click();
   const dialog = page.getByRole("dialog", { name: "Unlock review" });
   await dialog.waitFor({ state: "visible" });
