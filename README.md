@@ -1,14 +1,42 @@
 # @r3lab/web-review
 
-An in-page review overlay for React and Next.js apps: a reviewer on a preview
-deployment drops a pin on any DOM element (or a text selection) and leaves
-threaded comments; your team triages them.
+An in-page review overlay for React and Next.js apps: pin comments to any
+DOM element of a preview deployment — bring your own database.
+
+[![npm version](https://img.shields.io/npm/v/@r3lab/web-review.svg)](https://www.npmjs.com/package/@r3lab/web-review)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/R3-Lab/web-review/actions/workflows/ci.yml/badge.svg)](https://github.com/R3-Lab/web-review/actions/workflows/ci.yml)
+
+<img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/hero.png" width="1370" alt="Pins on a hero image, a feature card, and a testimonial highlight, with the triage panel open showing four threads across Design, Bug, and Copy, both open and resolved.">
 
 **It ships no server and no database.** The client reaches your storage
 through a `ReviewAdapter`; the optional Next.js route-handler factory reaches
-it through a `ReviewStore` you implement. You own the schema, the queries,
-and where the data lives — this package owns the pin, the anchoring, the
-thread UI, and the wire contract between the two.
+it through a `ReviewStore` you implement — you own the schema, the queries,
+and where the data lives. A reviewer on a preview deployment drops a pin on
+any DOM element (or a text selection) and leaves a threaded comment; your
+team triages from a side panel, no reviewer account required.
+
+## Features
+
+- **Text-selection anchoring** — select a run of text, not just an element,
+  and the pin follows the exact words (see [How anchoring
+  works](#how-anchoring-works)).
+- **Anchors that survive re-renders** — a layered anchor (selector, text
+  hint, class fingerprint, ancestor path, geometry) rebinds after a markup
+  change or a copy edit; when it can't rebind confidently, the pin still
+  renders at its last known position, badged **drifted**, instead of
+  disappearing.
+- **No reviewer accounts** — a shared-password gate and a browser-minted
+  identity stand in for a login; nothing to provision in your users table.
+- **Postgres and MySQL, both** — idempotent SQL files for each dialect, plus
+  Drizzle table factories if you'd rather compose than hand-write.
+- **~6 KB main entry** — the overlay UI is a separate chunk, lazily loaded
+  only once the feature is enabled (see [Bundle cost](#bundle-cost) for the
+  full measurement, including a Turbopack caveat worth knowing about).
+
+See it wired to a real Postgres database in
+[`examples/next-demo`](examples/next-demo), a full Next.js App Router app
+you can run yourself.
 
 ## Contents
 
@@ -276,6 +304,11 @@ The four default UI surfaces — `Composer`, `Panel`, `ThreadDetail`,
 `UnlockDialog` — **are** exported as values, so you can replace just one and
 keep the rest stock via `renderComposer`/`renderPanel`/`renderUnlockDialog`:
 
+<img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/composer.png" width="493" alt="The default Composer surface: a category picker for Design, Copy, Bug, and Other, plus title, comment, and name fields.">
+
+*The stock `Composer` — one of the four default surfaces you can replace
+individually via a `render*` prop.*
+
 ```tsx
 import { createHttpAdapter, ReviewOverlay } from "@r3lab/web-review";
 import { MyBrandedComposer } from "./my-branded-composer";
@@ -333,6 +366,11 @@ What `createReviewRouteHandlers` (`@r3lab/web-review/next`) calls. This is
 the interface to implement against Prisma, raw `pg`/`mysql2`, or anything
 else — the Drizzle example in the [Next.js quickstart](#quickstart-nextjs)
 above is one concrete implementation of it.
+
+<img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/thread-detail.png" width="384" alt="A resolved thread with two comments and a Reopen control.">
+
+*A resolved thread, rendered by the stock `ThreadDetail` surface — the
+Reopen control is what calls `setStatus`.*
 
 | Method | Required | Returns | Notes |
 |---|---|---|---|
@@ -493,6 +531,11 @@ source (`src/core/config.ts`):
 
 ## Auth model
 
+<img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/unlock.png" width="378" alt="The shared-password unlock dialog, with the locked Review launcher behind it.">
+
+*A reviewer unlocks with the shared password — there's no account to
+create.*
+
 A shared-password gate, not per-reviewer accounts — see the [database
 schema](#database-schema) note on why. A successful `POST /unlock` mints a
 signed, `httpOnly` cookie (`sameSite: "lax"`, `secure` on by default when
@@ -523,6 +566,11 @@ can't extend it by editing the cookie).
   deployment; if this guards anything more valuable, swap in a shared store.
 
 ## How anchoring works
+
+<img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/text-anchor.png" width="892" alt="The word 'unlimited' highlighted with its pin — the anchor follows an exact text selection, not just an element.">
+
+*Text-selection anchoring: the pin follows the exact words, not just the
+element that contains them.*
 
 Capture, at pin-drop, records a **layered** anchor, not just a selector: a
 CSS selector (id or `data-testid` preferred, else a `:nth-of-type` path from
