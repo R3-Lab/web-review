@@ -265,17 +265,33 @@ body.r3wr-picking {
   position: absolute;
   width: 30px;
   height: 30px;
-  /* Both margins are -half the box's own dimension, so the pin's rendered
-     BOUNDING BOX (what getBoundingClientRect measures, unaffected by
-     border-radius) is centered exactly on the `left`/`top` coordinate
-     passed in — that coordinate is the anchor's captured/resolved point,
-     and Pin/DraftPin are meant to visually center on it, not point at it
-     with one corner. A previous `margin-top: -30px` (a full box-height,
-     copied from a design that wanted the box entirely above the point)
-     left the rendered center 15px above the anchor — reproduced and fixed
-     under WP29; see `examples/next-demo/e2e/reload-anchor.spec.ts`. */
+  /* WP29/WP32: the marker is a map-pin teardrop — its SHARP CORNER (the tip)
+     is meant to touch the `left`/`top` coordinate (the anchor's
+     captured/resolved point), with the round body sitting above it, NOT
+     the box's bounding-box center sitting on the point. A prior fix
+     (WP29) centered the box instead, which measured as "correct" by a
+     bounding-box-center assertion but visually put the body ON TOP of the
+     target — confirmed by the regenerated screenshots.
+     `margin-left: -15px` is -half the box's own width (`S/2`), which
+     keeps things horizontally centered — that part was always right.
+     `margin-top` needs a DIFFERENT, larger offset, because the sharp
+     corner (border-radius bottom-left: 0) is not at the box's own
+     bottom-center; it's at the bottom-LEFT corner, `(-S/2, +S/2)` relative
+     to the box's center. Rotating that point by the box's own
+     `rotate(-45deg)` lands it at `(0, +S/2 * sqrt(2))` relative to
+     center — i.e. exactly `S/2 * sqrt(2)` BELOW center, with zero
+     horizontal drift (both facts fall out of the -45° rotation of this
+     specific corner). For the tip to land exactly on the anchor, the
+     center must sit `S/2 * sqrt(2)` ABOVE the anchor — so:
+       marginTop = -(S/2 + S/2 * sqrt(2)) = -(15 + 15*1.41421356) ≈ -36.213px
+     (S = 30). Verified empirically (a standalone rotated box at this
+     margin measured a tip within 0.01px of its anchor point) before this
+     value was written in. The rendered tip is exactly the bounding box's
+     own bottom-center point — `examples/next-demo/e2e/helpers.ts`'s
+     `tipOf()` exploits that same fact instead of re-deriving the
+     rotation, and `reload-anchor.spec.ts` asserts against it. */
   margin-left: -15px;
-  margin-top: -15px;
+  margin-top: -36.213px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -315,9 +331,9 @@ body.r3wr-picking {
   position: absolute;
   width: 30px;
   height: 30px;
-  /* Same centering fix as `.r3wr-pin` above — see its comment. */
+  /* Same tip-to-anchor geometry as `.r3wr-pin` above — see its comment. */
   margin-left: -15px;
-  margin-top: -15px;
+  margin-top: -36.213px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
