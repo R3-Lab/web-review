@@ -36,8 +36,16 @@ import type {
   ReviewStatus,
   ReviewThreadView,
 } from "../core/types";
+import { captureScreenshot } from "../client/screenshot";
 import { OverlayRoot } from "./overlay-root";
 import type { OverlayRootProps, PanelRenderProps } from "./overlay-root";
+
+// `captureScreenshot` does real rasterization work (dynamic `@zumer/snapdom`
+// import, canvas encode) that jsdom can't perform — mocked here so the
+// "screenshot lifecycle" tests below can control exactly what
+// `beginScreenshot` (`./overlay-root.tsx`) sees a capture resolve to,
+// without needing a real DOM layout or canvas backend.
+vi.mock("../client/screenshot", () => ({ captureScreenshot: vi.fn() }));
 
 // ─────────────────────────────── DOM stubbing ────────────────────────────────
 // jsdom has no layout: getBoundingClientRect returns zeros unless stubbed.
@@ -575,5 +583,87 @@ describe("accessibility", () => {
     const owned = document.body.querySelectorAll(`[${OVERLAY_ATTR}]`);
     expect(owned.length).toBeGreaterThan(0);
     owned.forEach((el) => expect(el.getAttribute(OVERLAY_ATTR)).toBe(""));
+  });
+});
+
+// WP25 / defect 1: `beginScreenshot`'s resulting `shotState` must never
+// claim "done" (attached) unless `adapter.uploadScreenshot` actually
+// returned a key — see the sibling suite in `./composer.test.tsx` for the
+// UI-copy side of this same contract.
+describe("screenshot lifecycle", () => {
+  // `vi.restoreAllMocks()` in the top-level `afterEach` only restores spies
+  // created via `vi.spyOn` — it does not reset the call history or resolved
+  // value of `captureScreenshot`, a plain `vi.fn()` supplied by the
+  // top-of-file `vi.mock` factory. Without this, a later test in this suite
+  // would see call counts left over from an earlier one.
+  beforeEach(() => {
+    vi.mocked(captureScreenshot).mockReset();
+  });
+
+  function dropPinAndCapture(
+    target: HTMLElement,
+    extraAdapter: Partial<{ uploadScreenshot: (blob: Blob) => Promise<string | null> }>,
+  ) {
+    stubRect(target, { x: 0, y: 0, w: 100, h: 40 });
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+    const adapter = { ...makeAdapter([]), ...extraAdapter };
+    const shotStates: Array<string> = [];
+    const user = userEvent.setup();
+    renderOverlay(
+      { adapter },
+      {
+        renderComposer: (props) => {
+          shotStates.push(props.shotState);
+          return null;
+        },
+      },
+    );
+    return { adapter, shotStates, user };
+  }
+
+  it('never reports "done" when uploadScreenshot resolves null — it reports "unavailable" instead', async () => {
+    vi.mocked(captureScreenshot).mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const { shotStates, user } = dropPinAndCapture(target, {
+      uploadScreenshot: vi.fn().mockResolvedValue(null),
+    });
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    await user.keyboard("c");
+    await user.click(target);
+
+    await waitFor(() => expect(shotStates).toContain("unavailable"));
+    expect(shotStates).not.toContain("done");
+  });
+
+  it('reports "done" when uploadScreenshot resolves a real key', async () => {
+    vi.mocked(captureScreenshot).mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const { shotStates, user } = dropPinAndCapture(target, {
+      uploadScreenshot: vi.fn().mockResolvedValue("shots/abc123.png"),
+    });
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    await user.keyboard("c");
+    await user.click(target);
+
+    await waitFor(() => expect(shotStates).toContain("done"));
+    expect(shotStates).not.toContain("unavailable");
+  });
+
+  it("never attempts a capture, and shotState stays idle, when the adapter has no uploadScreenshot at all", async () => {
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const { shotStates, user } = dropPinAndCapture(target, {});
+
+    await screen.findByRole("button", { name: /drop a review pin/i });
+    await user.keyboard("c");
+    await user.click(target);
+
+    await waitFor(() => expect(shotStates.length).toBeGreaterThan(0));
+    expect(captureScreenshot).not.toHaveBeenCalled();
+    expect(shotStates.every((s) => s === "idle")).toBe(true);
   });
 });

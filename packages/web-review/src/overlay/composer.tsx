@@ -15,12 +15,12 @@
  *    fixed `unlock()` import.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { OVERLAY_ATTR } from "../anchor";
 import { isLocked } from "../core/adapter";
-import type { AnchorKind, ReviewCategoryDef } from "../core/types";
+import type { Anchor, AnchorKind, ReviewCategoryDef } from "../core/types";
 import { useFocusTrap } from "../client/use-focus-trap";
 import type { ComposerRenderProps } from "./overlay-root";
 import { CategoryIcon, CircleAlertIcon, XIcon } from "./icons";
@@ -41,11 +41,86 @@ function defaultCategoryId(categories: ReviewCategoryDef[], kind: AnchorKind | u
   return categories.find((c) => c.id === preferred)?.id ?? categories[0]?.id ?? preferred;
 }
 
+// ─────────────────────── on-screen position clamping ─────────────────────
+// Two axes, two different bugs (WP21): horizontally the clamp didn't know
+// `.r3wr-panel` exists at all; vertically it clamped against a flat 160px
+// guess when real content runs ~450-550px. Both are fixed by clamping
+// against the composer's REAL right/bottom-edge limits — the panel's actual
+// reserved width, and the composer's actual measured height — rather than
+// guessing either.
+
+/**
+ * `.r3wr-panel`'s own geometry (`overlay.css`), mirrored here so the
+ * composer's submit button never lands underneath it. Below
+ * `PANEL_NARROW_BREAKPOINT_PX` the panel stops being a right-docked sidebar
+ * and becomes a bottom sheet instead (`overlay.css`'s
+ * `@media (max-width: 560px)`), so it no longer competes for horizontal
+ * space at all — the reservation below is 0 past that point.
+ */
+const PANEL_WIDTH_PX = 384;
+const PANEL_MAX_WIDTH_VW = 0.94;
+const PANEL_NARROW_BREAKPOINT_PX = 560;
+
+/** How much horizontal space `.r3wr-panel` actually reserves along the right edge right now, or 0 when it isn't docked there. */
+function panelReservedWidth(panelOpen: boolean, innerWidth: number): number {
+  if (!panelOpen || innerWidth <= PANEL_NARROW_BREAKPOINT_PX) return 0;
+  return Math.min(PANEL_WIDTH_PX, innerWidth * PANEL_MAX_WIDTH_VW);
+}
+
+/**
+ * First-paint fallback for the composer's own rendered height, used only
+ * until the `useLayoutEffect` below measures the real thing — which it does
+ * before the browser paints, so this value is never actually visible to a
+ * reviewer under normal operation. Set near the middle of the ~450-550px
+ * real-world range this bug report measured (category picker + title +
+ * comment + name + shot note + actions), rather than the old flat 160px
+ * that assumed almost no content at all.
+ */
+const COMPOSER_HEIGHT_FALLBACK_PX = 500;
+
+/** Viewport-coordinate position for the composer, clamped so the WHOLE box — not just its top-left corner — stays inside the visible viewport and clear of the panel. */
+function clampComposerPosition(
+  anchor: Anchor,
+  panelOpen: boolean,
+  composerHeight: number,
+): { left: number; top: number } {
+  // Mirrors `.r3wr-composer`'s own `width: min(336px, calc(100vw - 16px))`
+  // — see that rule's comment in `overlay.css` for why the two must agree.
+  const width = Math.min(336, window.innerWidth - 16);
+  const vx = anchor.rect.x + anchor.offsetPct.x * anchor.rect.w - window.scrollX;
+  const vy = anchor.rect.y + anchor.offsetPct.y * anchor.rect.h - window.scrollY;
+
+  const reservedRight = panelReservedWidth(panelOpen, window.innerWidth);
+  // `Math.max(8, ...)` on each bound: if the panel and the composer's own
+  // minimum width genuinely cannot both fit (an extremely narrow desktop
+  // window), best-effort clamp to the 8px margin rather than let the min()
+  // below pick a negative bound and push the composer off the left edge —
+  // a little overlap with the panel is a smaller failure than that.
+  const maxLeft = Math.max(8, window.innerWidth - width - 8 - reservedRight);
+  const left = Math.max(8, Math.min(vx + 16, maxLeft));
+
+  const maxTop = Math.max(8, window.innerHeight - composerHeight - 8);
+  const top = Math.max(8, Math.min(vy + 16, maxTop));
+
+  return { left, top };
+}
+
+/** `clampComposerPosition`, using `el`'s real rendered height when mounted, else the first-paint fallback. */
+function measureAndClamp(
+  anchor: Anchor,
+  panelOpen: boolean,
+  el: HTMLDivElement | null,
+): { left: number; top: number } {
+  const composerHeight = el?.getBoundingClientRect().height || COMPOSER_HEIGHT_FALLBACK_PX;
+  return clampComposerPosition(anchor, panelOpen, composerHeight);
+}
+
 export function Composer({
   anchor,
   config,
   identity,
   shotState,
+  panelOpen,
   onCancel,
   onSubmit,
   onUnlocked,
@@ -68,16 +143,36 @@ export function Composer({
     bodyRef.current?.focus();
   }, []);
 
-  // Position near the pin in VIEWPORT coords (the composer is `fixed`), clamped
-  // on-screen. The width MUST mirror the stylesheet's `width: min(336px, calc(100vw
-  // - 16px))` — clamping against a stale constant is how you get a composer that
-  // hangs off the right edge and gives the page a horizontal scrollbar on a narrow
-  // viewport.
-  const COMPOSER_W = Math.min(336, window.innerWidth - 16);
-  const vx = anchor.rect.x + anchor.offsetPct.x * anchor.rect.w - window.scrollX;
-  const vy = anchor.rect.y + anchor.offsetPct.y * anchor.rect.h - window.scrollY;
-  const left = Math.max(8, Math.min(vx + 16, window.innerWidth - COMPOSER_W - 8));
-  const top = Math.max(8, Math.min(vy + 16, window.innerHeight - 160));
+  // Position near the pin in VIEWPORT coords (the composer is `fixed`),
+  // clamped fully on-screen and clear of the panel — see
+  // `clampComposerPosition` above. Seeded with a fallback height for the
+  // very first paint; the layout effect below corrects it to the real
+  // measured height before that paint happens.
+  const [pos, setPos] = useState(() => measureAndClamp(anchor, panelOpen, null));
+
+  // Re-clamp to the composer's REAL rendered height, which varies with its
+  // content (the name field, an error message, the inline password-recovery
+  // form all change it) — before the browser paints, so a reviewer never
+  // sees the fallback guess. Deliberately has no dependency array, so it
+  // re-checks after every render rather than only on mount; the equality
+  // guard is what keeps that from looping once `pos` already matches.
+  useLayoutEffect(() => {
+    setPos((prev) => {
+      const next = measureAndClamp(anchor, panelOpen, ref.current);
+      return prev.left === next.left && prev.top === next.top ? prev : next;
+    });
+  });
+
+  // A window resize can trigger the exact same clamp bug mid-session (the
+  // panel's own `max-width: 94vw` shrinking it, or the viewport shrinking
+  // under the composer's real height) — resize doesn't re-render on its
+  // own, so this needs its own listener rather than relying on the layout
+  // effect above.
+  useEffect(() => {
+    const onResize = () => setPos(measureAndClamp(anchor, panelOpen, ref.current));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [anchor, panelOpen, ref]);
 
   const doSubmit = async (): Promise<boolean> => {
     setBusy(true);
@@ -123,7 +218,7 @@ export function Composer({
       aria-modal="true"
       aria-labelledby={`${ids}-title`}
       {...TAG}
-      style={{ left, top }}
+      style={{ left: pos.left, top: pos.top }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           // See the matching comment in `./unlock-dialog`'s `UnlockDialog` —
@@ -228,18 +323,27 @@ export function Composer({
         </div>
       )}
 
-      <p className="r3wr-shot-note" {...TAG}>
-        {shotState === "pending" ? (
-          <>
-            <span className="r3wr-spin" {...TAG} aria-hidden="true" />
-            Capturing a screenshot…
-          </>
-        ) : shotState === "done" ? (
-          "Screenshot attached."
-        ) : (
-          "No screenshot — submitting without one."
-        )}
-      </p>
+      {/* When `config.screenshots` is false — no `adapter.uploadScreenshot` at
+          all, or the consumer explicitly opted out — no capture was ever
+          attempted, so there is nothing honest to report; the note is
+          omitted rather than printing a screenshot status for a feature
+          that isn't in play. */}
+      {config.screenshots && (
+        <p className="r3wr-shot-note" {...TAG}>
+          {shotState === "pending" ? (
+            <>
+              <span className="r3wr-spin" {...TAG} aria-hidden="true" />
+              Capturing a screenshot…
+            </>
+          ) : shotState === "done" ? (
+            "Screenshot attached."
+          ) : shotState === "unavailable" ? (
+            "Screenshot captured, but couldn't be saved — submitting without one."
+          ) : (
+            "No screenshot — submitting without one."
+          )}
+        </p>
+      )}
 
       {needsPassword && (
         <PasswordForm
