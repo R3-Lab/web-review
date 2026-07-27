@@ -7,7 +7,8 @@
  * (`feedback-overlay-inner.tsx`, lines 1-1130 of that file, plus its helper
  * section). This file owns EVERYTHING that isn't visual composition of the
  * composer / thread panel / thread detail / unlock dialog — those four
- * surfaces are WP4b's job. What lives here:
+ * surfaces are implemented in `./composer`, `./panel`, and
+ * `./unlock-dialog`. What lives here:
  *
  *   - the access gate (checking / locked / unlocked / disabled)
  *   - loading + polling threads for the current page
@@ -18,12 +19,13 @@
  *   - the highlight-visibility toggle (persisted)
  *   - the ARIA live region
  *
- * WP4b's Composer / Panel / ThreadDetail / UnlockDialog are plugged in via
+ * `Composer` / `Panel` / `ThreadDetail` / `UnlockDialog` are plugged in via
  * `renderComposer` / `renderPanel` / `renderUnlockDialog` render props rather
  * than being imported here — this file has no knowledge of their internals,
  * only of the data and callbacks they need. See the exported `*RenderProps`
  * interfaces below for the exact contract; each one is documented at its
- * declaration since those doc comments ARE the seam WP4b implements against.
+ * declaration since those doc comments ARE the seam those components
+ * implement against.
  *
  * Differences from the reference, and why:
  *  - `usePathname()` (Next-only) → `useLocation()` (`../client/use-location`,
@@ -33,7 +35,7 @@
  *    behavioural changed.
  *  - The click-capture handler also skips `isEditableTarget` targets (the
  *    reference only checked this in the keyboard handler). This is a
- *    deliberate WP4a requirement: a reviewer should never have a pin dropped
+ *    deliberate requirement: a reviewer should never have a pin dropped
  *    UNDER them while typing into a form field on the host page.
  *  - Screenshot upload goes through `config.adapter.uploadScreenshot`
  *    (present only when `config.screenshots` resolved `true`) instead of a
@@ -111,10 +113,10 @@ interface Draft {
   anchor: Anchor;
 }
 
-// ─────────────────────────── WP4b seam contracts ────────────────────────────
+// ────────────────────────── Panel-surface seam contracts ────────────────────
 
 /**
- * Everything WP4b's Composer needs to render a form for `anchor` and report
+ * Everything `Composer` needs to render a form for `anchor` and report
  * back what happened. `OverlayRoot` calls `renderComposer(props)` in place
  * of the composer whenever `draft` is set (i.e. right after a pin drops) and
  * stops calling it the moment `onCancel` or a successful `onSubmit` runs.
@@ -156,7 +158,7 @@ export interface ComposerRenderProps {
 }
 
 /**
- * Everything WP4b's thread panel (list + detail) needs. `OverlayRoot` calls
+ * Everything the thread panel (list + detail) needs. `OverlayRoot` calls
  * `renderPanel(props)` whenever `panelOpen` is true; `threads` is already
  * filtered by `filter`, `selected` is the full thread (with comments) once
  * `onSelect` has resolved it, or the list-row projection until then.
@@ -192,8 +194,9 @@ export interface PanelRenderProps {
 /**
  * Rendered by `OverlayRoot` when the gate is `"locked"` and the reviewer has
  * opened the launcher's dialog. `OverlayRoot` owns the launcher button
- * itself (see `renderUnlockDialog`'s call site) — WP4b supplies only the
- * dialog's contents (a password field wired to `config.adapter.unlock`).
+ * itself (see `renderUnlockDialog`'s call site) — `UnlockDialog` supplies
+ * only the dialog's contents (a password field wired to
+ * `config.adapter.unlock`).
  */
 export interface UnlockRenderProps {
   config: ResolvedReviewConfig;
@@ -492,9 +495,9 @@ export function OverlayRoot({
   }, [pinDropMode, gate]);
 
   // Click capture: drop the pin. Skips our own chrome AND editable targets —
-  // the latter is a WP4a requirement the reference implementation didn't
-  // need: a reviewer must never have a pin dropped under them while typing
-  // into a host-page form field.
+  // the latter is a requirement the reference implementation didn't need: a
+  // reviewer must never have a pin dropped under them while typing into a
+  // host-page form field.
   useEffect(() => {
     if (!pinDropMode || gate !== "unlocked") return;
     const onClick = (e: MouseEvent) => {

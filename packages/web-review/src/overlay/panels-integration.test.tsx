@@ -1,9 +1,9 @@
 /**
- * WP4b integration test — the full pin → composer → panel → reply → resolve
+ * Integration test — the full pin → composer → panel → reply → resolve
  * round trip, wired through `OverlayRoot`'s real render-prop seam with THIS
  * package's actual `Composer` / `Panel` / `UnlockDialog` (not the inline
  * stub components `./overlay-root.test.tsx` uses to test the seam itself in
- * WP4a). A fake in-memory `ReviewAdapter` stands in for a consumer's
+ * isolation). A fake in-memory `ReviewAdapter` stands in for a consumer's
  * storage — copied from `./overlay-root.test.tsx`'s own fake, since it
  * already models the exact contract (`ReviewAdapter`, `core/adapter.ts`)
  * this test also needs.
@@ -214,7 +214,7 @@ function renderFullOverlay(config: ReviewConfig) {
   );
 }
 
-describe("WP4b integration: pin drop → composer → panel → reply → resolve", () => {
+describe("panel-surface integration: pin drop → composer → panel → reply → resolve", () => {
   it("carries a new thread from pin-drop through the composer, the panel list, detail, a reply, and a resolve", async () => {
     const target = document.createElement("div");
     target.setAttribute("data-testid", "widget");

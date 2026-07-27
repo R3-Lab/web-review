@@ -769,7 +769,7 @@ describe("POST /screenshot", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 404 code discrimination — the WP19 defect
+// 404 code discrimination
 // ---------------------------------------------------------------------------
 //
 // Three semantically different conditions all answer 404 through this
@@ -782,7 +782,7 @@ describe("POST /screenshot", () => {
 // kill-switch one, using the REAL response bodies this factory produces
 // (not hand-constructed `ReviewApiError`s), so a future change that
 // collapses the codes back together fails here first.
-describe("404 code discrimination (WP19)", () => {
+describe("404 code discrimination", () => {
   it("the kill switch, an unknown thread, and unsupported screenshots each carry a distinct code", async () => {
     const disabledHandlers = buildHandlers({ access: { password: undefined, secret: undefined } });
     const disabledRes = await disabledHandlers.threads.GET(makeRequest("GET", "/threads?urlKey=/"));
@@ -811,9 +811,9 @@ describe("404 code discrimination (WP19)", () => {
     expect(new Set([disabledCode, missingThreadCode, screenshotCode]).size).toBe(3);
   });
 
-  // REGRESSION TEST for the WP19 defect: before the fix, every 404 above
-  // carried code `not_found`, which is exactly the code `isFeatureDisabled`
-  // used to check for — so it returned `true` for an unknown-thread 404 too.
+  // REGRESSION TEST: before the fix, every 404 above carried code
+  // `not_found`, which is exactly the code `isFeatureDisabled` used to
+  // check for — so it returned `true` for an unknown-thread 404 too.
   // Verified by hand against pre-fix `src/next/routes.ts` /
   // `src/core/adapter.ts`: this second assertion (`false`) failed there.
   it("isFeatureDisabled is true for the kill-switch 404 and false for an unknown-thread 404", async () => {

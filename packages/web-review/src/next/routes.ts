@@ -52,8 +52,9 @@
  * export const { POST } = review.screenshot;
  * ```
  *
- * Route paths are the consumer's choice — the client HTTP adapter (WP3) is
- * configured with whatever base path is used here.
+ * Route paths are the consumer's choice — the client HTTP adapter
+ * (`createHttpAdapter`, `../client/http-adapter`) is configured with
+ * whatever base path is used here.
  *
  * Generalized from a single-app reference (Drizzle + Neon + R2 + Better
  * Auth): the HTTP semantics, status codes, and security checks are ported

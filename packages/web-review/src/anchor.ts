@@ -30,7 +30,7 @@
  * `normalizeUrl` keeps the reference's behaviour exactly, INCLUDING that it
  * does NOT strip locale prefixes — see the doc comment on it in
  * `./normalize-url` for why. It's implemented there, not here, purely for
- * bundle shape (WP24) — see that file's header for the full story — and
+ * bundle shape — see that file's header for the full story — and
  * re-exported below so it's still part of this module's own API.
  */
 
@@ -534,9 +534,9 @@ function rectProximity(a: Anchor, el: Element): number {
 // ────────────────────────────────── url ─────────────────────────────────────
 
 /**
- * `normalizeUrl` itself now lives in `./normalize-url` (WP24) — this module
- * still owns everything ABOUT it that isn't the bundle-shape concern that
- * moved it out: re-exported here so this package's public API
+ * `normalizeUrl` itself lives in `./normalize-url` — this module still owns
+ * everything ABOUT it that isn't the bundle-shape concern that moved it out:
+ * re-exported here so this package's public API
  * (`import { normalizeUrl } from "@r3lab/web-review"`, and
  * `import { normalizeUrl } from "../anchor"` elsewhere in this package) is
  * unchanged, and imported below for `captureAnchor`'s own internal use

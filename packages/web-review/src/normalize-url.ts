@@ -1,6 +1,6 @@
 /**
- * `normalizeUrl` — split out of `./anchor` (WP24) purely for bundle shape,
- * not for any change in behavior or ownership: this is still the DOM
+ * `normalizeUrl` — split out of `./anchor` purely for bundle shape, not for
+ * any change in behavior or ownership: this is still the DOM
  * anchoring engine's page-key derivation, ported unchanged from the same
  * reference implementation `./anchor`'s own header describes. It lives in
  * its own module because `./core/config`'s `resolveConfig` needs it as the

@@ -43,7 +43,7 @@
  * `<body>`), so there is nothing to prerender, and `Suspense`'s `null`
  * fallback means there is nothing to show while the chunk loads either.
  *
- * `LazyOverlayRoot` wires WP4b's four surfaces (`Composer`, `Panel`,
+ * `LazyOverlayRoot` wires the four panel surfaces (`Composer`, `Panel`,
  * `UnlockDialog` — `ThreadDetail` is `Panel`'s own internal, not a render
  * prop) in as `OverlayRoot`'s default `renderComposer` / `renderPanel` /
  * `renderUnlockDialog`, so the overlay is complete out of the box: a
@@ -79,11 +79,11 @@ const LazyOverlayRoot = lazy(loadWiredOverlayRoot);
 
 export interface ReviewOverlayProps {
   config: ReviewConfig;
-  /** See `ComposerRenderProps` in `./overlay-root` — WP4b's composer. */
+  /** See `ComposerRenderProps` in `./overlay-root` — the composer. */
   renderComposer?: (props: ComposerRenderProps) => ReactNode;
-  /** See `PanelRenderProps` in `./overlay-root` — WP4b's thread panel/detail. */
+  /** See `PanelRenderProps` in `./overlay-root` — the thread panel/detail. */
   renderPanel?: (props: PanelRenderProps) => ReactNode;
-  /** See `UnlockRenderProps` in `./overlay-root` — WP4b's unlock dialog. */
+  /** See `UnlockRenderProps` in `./overlay-root` — the unlock dialog. */
   renderUnlockDialog?: (props: UnlockRenderProps) => ReactNode;
 }
 

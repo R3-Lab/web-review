@@ -1,5 +1,5 @@
 /**
- * Shared constants for the E2E suite (WP11). `DATABASE_URL` / `REVIEW_PASSWORD`
+ * Shared constants for the E2E suite. `DATABASE_URL` / `REVIEW_PASSWORD`
  * / `REVIEW_SECRET` are read from `process.env` — `scripts/e2e.sh` exports
  * them before invoking `playwright test`, so this is the single place both
  * `playwright.config.ts` (webServer env for the Next.js processes it spawns)

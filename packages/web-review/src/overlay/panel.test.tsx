@@ -2,7 +2,7 @@
  * `Panel` interaction tests (vitest + jsdom + React Testing Library).
  *
  * Renders `Panel` directly against a minimal `PanelRenderProps` fixture — no
- * `OverlayRoot` involved — so these tests exercise exactly the seam WP4b
+ * `OverlayRoot` involved — so these tests exercise exactly the seam `Panel`
  * implements against (`./overlay-root`'s `PanelRenderProps`) in isolation.
  * `ThreadDetail` (rendered internally by `Panel` once `selected` is set) has
  * its own dedicated test file, `./thread-detail.test.tsx`.

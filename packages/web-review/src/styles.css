@@ -2,9 +2,9 @@
  *
  * This file is the public entry (`@r3lab/web-review/styles.css`) but stays
  * empty on disk: the overlay's actual rules live in `./overlay/overlay.css`
- * (`r3wr-` prefixed, WP4a's shell rules so far — pins, highlights, drift,
- * the pin-drop toggle; WP4b appends the panel/composer/detail rules on top
- * of the same file). `tsup.config.ts`'s `onSuccess` concatenates
+ * (`r3wr-` prefixed — the shell rules: pins, highlights, drift, the
+ * pin-drop toggle; plus the panel/composer/detail rules layered on top of
+ * the same file). `tsup.config.ts`'s `onSuccess` concatenates
  * `overlay.css` after this file's contents into `dist/styles.css` at build
  * time, so consumers get one self-contained stylesheet with no `@import` to
  * resolve — see the build step for why concatenation was chosen over an

@@ -5,10 +5,12 @@
  * has NO tests at all — it was hand-verified in a browser. This is new work,
  * so the bar is real interactions (keyboard, click, selection), not render
  * smoke tests. A fake in-memory `ReviewAdapter` stands in for a consumer's
- * storage; WP4b's Composer/Panel/UnlockDialog don't exist yet, so wherever a
- * test needs to exercise a render-prop seam it supplies a minimal stub
- * component inline — that stub IS the contract WP4b's real components will
- * satisfy.
+ * storage; these tests exercise `OverlayRoot`'s render-prop seam in
+ * isolation from the real `Composer`/`Panel`/`UnlockDialog`, so wherever a
+ * test needs to exercise that seam it supplies a minimal stub component
+ * inline — that stub IS the contract the real components satisfy (see
+ * `./panels-integration.test.tsx` for the same round trip through the real
+ * components instead of stubs).
  *
  * jsdom has no layout engine (`getBoundingClientRect` returns zeros) and no
  * `elementFromPoint` at all — the geometry stubbing below is copied from the
@@ -505,7 +507,7 @@ describe("gate", () => {
     expect(document.body.querySelector(`[${OVERLAY_ATTR}]`)).toBeNull();
   });
 
-  // WP19 regression: a 404 for an unrelated reason (e.g. an unknown thread
+  // Regression: a 404 for an unrelated reason (e.g. an unknown thread
   // id, coded `not_found`) must NOT be mistaken for the feature being
   // switched off — `isFeatureDisabled` only recognizes `feature_disabled`.
   // The probe fails soft here (see `OverlayRoot`'s `probe` callback), so the

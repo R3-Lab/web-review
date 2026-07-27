@@ -13,9 +13,9 @@ import { OVERLAY_ATTR } from "../anchor";
 import type { ReviewThreadView } from "../core/types";
 import { ReviewOverlay } from "./review-overlay";
 
-// `ReviewOverlay` loads `./overlay-root` — and, as of WP4b, `./composer`,
-// `./panel`, and `./unlock-dialog` alongside it, so its render props have
-// working defaults out of the box — behind a single `React.lazy` dynamic
+// `ReviewOverlay` loads `./overlay-root` — and `./composer`, `./panel`, and
+// `./unlock-dialog` alongside it, so its render props have working defaults
+// out of the box — behind a single `React.lazy` dynamic
 // `import()`, by design (see that file's header) — so none of the four are
 // fetched until the gate actually opens. The FIRST time any test opens the
 // gate, all four imports have to be transformed and evaluated for the first

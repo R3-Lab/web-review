@@ -191,9 +191,9 @@ describe.skipIf(!distExists)("dist/ build output", () => {
 
   describe('"use client" placement', () => {
     /**
-     * Regression test (WP15, second pass): a first attempt at restoring
-     * code-splitting for the overlay set `splitting: true` uniformly for
-     * BOTH `esm` and `cjs` output. esbuild's own splitting only works for
+     * Regression test: a first attempt at restoring code-splitting for the
+     * overlay set `splitting: true` uniformly for BOTH `esm` and `cjs`
+     * output. esbuild's own splitting only works for
      * `esm` — for the `cjs` build, tsup's own per-format loop reacts to
      * `format === "cjs" && splitting` by asking esbuild for `esm` output
      * and then converting it to CJS through a different code path
@@ -244,7 +244,7 @@ describe.skipIf(!distExists)("dist/ build output", () => {
   });
 
   /**
-   * Regression test for WP15: `tsup.config.ts` used to build every entry
+   * Regression test: `tsup.config.ts` used to build every entry
    * with `splitting: false`, which made esbuild inline any dynamically
    * `import()`-ed module directly into the entry that imported it — per
    * esbuild's own docs, "an `import('path')` expression behaves similar to
@@ -266,20 +266,20 @@ describe.skipIf(!distExists)("dist/ build output", () => {
    * earlier attempt at forcing it for `cjs` too corrupted the directive
    * prologue (see the `'"use client" placement'` describe block above),
    * so `dist/index.cjs`/`dist/next/client.cjs` intentionally keep their
-   * pre-WP15 shape: same ~55-60 KB / ~49-52 KB size, same inlined,
+   * original, unsplit shape: same ~55-60 KB / ~49-52 KB size, same inlined,
    * self-referencing `Promise.resolve().then()` around the overlay. These
    * tests assert the `esm` split stays real, and that the `cjs` files
    * correctly stayed OUT of it.
    */
-  describe("overlay code-splitting stays real (WP15)", () => {
+  describe("overlay code-splitting stays real", () => {
     const splitEsmEntries = ["index.js", "next/client.js"];
     const unsplitCjsEntries = ["index.cjs", "next/client.cjs"];
 
     it("dist/index.js and dist/next/client.js (ESM) stay small — the overlay is not inlined", () => {
-      // Baseline (splitting: false) sizes were ~55-60 KB. Post WP15,
-      // each is under 10 KB. 15 KB leaves generous headroom for normal
-      // growth while still catching a regression back to inlining the
-      // ~35 KB overlay chunk.
+      // Baseline (splitting: false) sizes were ~55-60 KB. With real
+      // splitting enabled, each is under 10 KB. 15 KB leaves generous
+      // headroom for normal growth while still catching a regression back
+      // to inlining the ~35 KB overlay chunk.
       for (const relPath of splitEsmEntries) {
         const content = readFileSync(join(distDir, relPath), "utf8");
         expect(content.length, `${relPath} should be small if the overlay isn't inlined into it`).toBeLessThan(
@@ -289,18 +289,18 @@ describe.skipIf(!distExists)("dist/ build output", () => {
     });
 
     /**
-     * Regression test (WP17): the test above ("stay small") only proves the
+     * Regression test: the test above ("stay small") only proves the
      * overlay isn't INLINED — it doesn't prove there's still a real
-     * `import()` boundary at all. This test used to assert that a literal
-     * `import(...)` appears IN the entry file itself. That was true when
-     * WP15 wrote it (the entry called `import()` directly), but WP16 later
-     * introduced a shared loader (`default-surfaces.tsx`, bundled as its
-     * own chunk) that BOTH entries import statically and which itself owns
-     * the real `import()` calls — so the dynamic-import edge legitimately
+     * `import()` boundary at all. An earlier version of this test asserted
+     * that a literal `import(...)` appears IN the entry file itself, which
+     * held only as long as the entry called `import()` directly. A shared
+     * loader (`default-surfaces.tsx`, bundled as its own chunk) now sits in
+     * between: BOTH entries import it statically, and it itself owns the
+     * real `import()` calls — so the dynamic-import edge legitimately
      * moved one level down the graph, from the entry into that loader
-     * chunk. The entry files never contained a literal `import(` again,
-     * failing the old, over-specific assertion even though the split was
-     * still completely real.
+     * chunk. The entry files never contain a literal `import(` anymore,
+     * which would fail the old, over-specific assertion even though the
+     * split is still completely real.
      *
      * What actually matters — and what this rewrite checks — isn't WHERE
      * in the file tree the `import()` call sits, it's whether the overlay
@@ -374,7 +374,7 @@ describe.skipIf(!distExists)("dist/ build output", () => {
       }
     });
 
-    it("dist/index.cjs and dist/next/client.cjs deliberately stay unsplit — same shape as before WP15", () => {
+    it("dist/index.cjs and dist/next/client.cjs deliberately stay unsplit — the original inlined shape", () => {
       // The counterpart to the two tests above: CJS never gets a real
       // `import()`-to-a-separate-chunk boundary (see this describe
       // block's own header for why), so its `Promise.resolve().then()`
@@ -385,7 +385,7 @@ describe.skipIf(!distExists)("dist/ build output", () => {
       // as a behavior change in THIS test, not just a silent size drop.
       for (const relPath of unsplitCjsEntries) {
         const content = readFileSync(join(distDir, relPath), "utf8");
-        expect(content.length, `${relPath} should stay at its pre-WP15 inlined size`).toBeGreaterThan(30_000);
+        expect(content.length, `${relPath} should stay at its original inlined size`).toBeGreaterThan(30_000);
         const match = content.match(/require\(["'](\.[^"']+)["']\)/);
         expect(match, `${relPath} should NOT require() a separate overlay chunk file`).toBeNull();
       }

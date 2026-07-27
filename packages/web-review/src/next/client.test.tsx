@@ -41,9 +41,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 // `DynamicOverlayRoot` is `../overlay/default-surfaces`'s
-// `loadWiredOverlayRoot` behind `next/dynamic`'s own dynamic `import()` — as
-// of this work package, that loader pulls in `./overlay-root` AND, alongside
-// it, `./composer`, `./panel`, and `./unlock-dialog`, so its render props
+// `loadWiredOverlayRoot` behind `next/dynamic`'s own dynamic `import()` —
+// that loader pulls in `./overlay-root` AND, alongside it, `./composer`,
+// `./panel`, and `./unlock-dialog`, so its render props
 // have working defaults out of the box (see `./client.tsx`'s header, and
 // `../overlay/default-surfaces`'s). The FIRST time any test opens the gate,
 // all four imports have to be transformed and evaluated for the first time,
@@ -234,15 +234,15 @@ describe("Next ReviewOverlay gate", () => {
 });
 
 /**
- * Regression coverage for the defect this work package fixes: `next/client`
- * used to `import("../overlay/overlay-root").then((m) => m.OverlayRoot)`
+ * Regression coverage for a defect where `next/client` used to
+ * `import("../overlay/overlay-root").then((m) => m.OverlayRoot)`
  * directly, bypassing the default `Composer`/`Panel`/`UnlockDialog` wiring
  * that `../overlay/review-overlay`'s `ReviewOverlay` has always shipped with
  * (see `../overlay/default-surfaces`'s header). A Next consumer mounting
  * `@r3lab/web-review/next/client` with only `config` — the documented path —
  * got pins that dropped with no composer, no panel, no unlock dialog ever
  * appearing, silently. These tests mount the Next entry the same way and
- * assert the real WP4b surfaces actually render, the same fake-adapter /
+ * assert the real panel surfaces actually render, the same fake-adapter /
  * `elementFromPoint` stubbing pattern `../overlay/panels-integration.test.tsx`
  * uses for the framework-agnostic entry's equivalent coverage.
  */
@@ -264,7 +264,7 @@ describe("Next ReviewOverlay: default surfaces wired with no render props", () =
     await user.keyboard("c");
     await user.click(target);
 
-    // The stock `Composer` (WP4b) — its category picker is the clearest
+    // The stock `Composer` — its category picker is the clearest
     // signal it's the real component, not an empty render.
     expect(await screen.findByRole("radiogroup")).toBeInTheDocument();
     expect(screen.getByLabelText(/title/i)).toBeInTheDocument();

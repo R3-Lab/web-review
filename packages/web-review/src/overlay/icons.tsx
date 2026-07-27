@@ -1,8 +1,8 @@
 /**
  * Inline SVG icon set replacing the reference implementation's `lucide-react`
- * imports. This package takes no icon-library dependency (see the WP4a brief
- * — `lucide-react` is explicitly forbidden), so each glyph the ported UI
- * needs is hand-drawn here as a tiny `currentColor`-driven component instead.
+ * imports. This package deliberately takes no icon-library dependency, so
+ * each glyph the ported UI needs is hand-drawn here as a tiny
+ * `currentColor`-driven component instead.
  *
  * Every icon is `aria-hidden` — the accessible name lives on the interactive
  * control that hosts it (a button's `aria-label`, a badge's text), never on

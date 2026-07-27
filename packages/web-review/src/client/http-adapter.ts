@@ -7,9 +7,10 @@
  * Rewritten (not ported) from a working single-app review tool's typed
  * fetch client (`feedback/api.ts`): that client hard-coded its routes and
  * error types. Here the method set is exactly `ReviewAdapter`, and the wire
- * shape below is the CONTRACT a consumer's server-side route factory (a
- * later work package) must implement — this file is the source of truth for
- * it, so read it before writing that factory.
+ * shape below is the CONTRACT a consumer's server-side route factory
+ * (`../next/routes.ts`'s `createReviewRouteHandlers`) must implement — this
+ * file is the source of truth for it, so read it before writing that
+ * factory.
  *
  *   POST   {base}/unlock                        { password }          -> { ok }
  *   GET    {base}/threads?urlKey=&status=&project=&limit=             -> { threads }

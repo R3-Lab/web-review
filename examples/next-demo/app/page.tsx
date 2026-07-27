@@ -2,7 +2,7 @@
  * The demo page — substantial enough that a reviewer can meaningfully pin
  * an element (a heading, a card, a button, the image) AND select text
  * inside a paragraph (the testimonial). Stable `id`/`data-testid`s are on
- * every pinnable element for a later Playwright suite (WP11) to target.
+ * every pinnable element for the Playwright E2E suite (`../e2e/`) to target.
  */
 
 const FEATURES = [
