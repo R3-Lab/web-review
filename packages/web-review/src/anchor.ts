@@ -8,7 +8,7 @@
  *
  *   captureAnchor(x, y)    → Anchor        // layered, redundant anchor at a click
  *   resolveAnchor(anchor)  → ResolveResult // re-bind after reload / re-render / nav
- *   normalizeUrl(href)     → string        // origin/hash-stripped page key
+ *   normalizeUrl(href)     → string        // origin/hash-stripped page key (re-exported — see below)
  *   localeFromPathPrefix(href, locales) → string | null
  *
  * Resolve is layered: an exact selector match is the high-confidence primary
@@ -28,8 +28,10 @@
  *     into `ReviewConfig.localeFromHref` with their own locale list.
  *
  * `normalizeUrl` keeps the reference's behaviour exactly, INCLUDING that it
- * does NOT strip locale prefixes — see the doc comment on `normalizeUrl`
- * below for why.
+ * does NOT strip locale prefixes — see the doc comment on it in
+ * `./normalize-url` for why. It's implemented there, not here, purely for
+ * bundle shape (WP24) — see that file's header for the full story — and
+ * re-exported below so it's still part of this module's own API.
  */
 
 import type {
@@ -41,6 +43,7 @@ import type {
   HighlightRectPct,
   ResolveResult,
 } from "./core/types";
+import { normalizeUrl } from "./normalize-url";
 
 /** Attribute marking our own overlay DOM, skipped during capture/scoring. */
 export const OVERLAY_ATTR = "data-r3-review";
@@ -531,41 +534,22 @@ function rectProximity(a: Anchor, el: Element): number {
 // ────────────────────────────────── url ─────────────────────────────────────
 
 /**
- * Normalize an href into a stable page key: strip the origin and hash, keep
- * the path — INCLUDING any locale prefix — plus a deterministic, sorted set
- * of significant query params (tracking/ephemeral params dropped).
- *
- * Keeping the prefix is deliberate: `/about` and `/tr/hakkimizda` (or
- * whatever segments a consumer's locales use) are different pages with
- * independently-written copy, and a pin left on one locale's wording must
- * never surface on another locale's page. This package has no notion of
- * what a consumer's locale segments are — see `localeFromPathPrefix` below,
- * which takes the locale list as a parameter rather than this module
- * hard-coding one — so `normalizeUrl` has no way to special-case them even
- * if it wanted to, and stripping blindly would risk merging pages that
- * happen to share a first path segment that isn't a locale at all.
+ * `normalizeUrl` itself now lives in `./normalize-url` (WP24) — this module
+ * still owns everything ABOUT it that isn't the bundle-shape concern that
+ * moved it out: re-exported here so this package's public API
+ * (`import { normalizeUrl } from "@r3lab/web-review"`, and
+ * `import { normalizeUrl } from "../anchor"` elsewhere in this package) is
+ * unchanged, and imported below for `captureAnchor`'s own internal use
+ * stamping `Anchor.urlKey`. See `./normalize-url`'s file header for why it
+ * moved (in short: `resolveConfig`, in `../core/config`, needs it as the
+ * default `urlKeyFromHref` and runs unconditionally, before any gate check —
+ * co-locating it here meant that eager path pulled in this WHOLE module,
+ * `OVERLAY_ATTR` and the rest of the anchoring engine included, since this
+ * module is also reachable asynchronously from `captureAnchor` below, and a
+ * module reachable both sync and async from the same bundle tends to end up
+ * as one shared chunk visible to both sides).
  */
-export function normalizeUrl(href: string): string {
-  let url: URL;
-  try {
-    url = new URL(href, "http://x");
-  } catch {
-    return href;
-  }
-  const segs = url.pathname.split("/").filter(Boolean);
-  const path = "/" + segs.join("/");
-
-  const keep: [string, string][] = [];
-  url.searchParams.forEach((v, k) => {
-    if (isSignificantParam(k)) keep.push([k, v]);
-  });
-  keep.sort(([a], [b]) => a.localeCompare(b));
-  const query = keep.length
-    ? "?" + keep.map(([k, v]) => `${k}=${v}`).join("&")
-    : "";
-
-  return (path === "/" ? "/" : path.replace(/\/$/, "")) + query;
-}
+export { normalizeUrl } from "./normalize-url";
 
 /**
  * Which locale (if any) the reviewer was reading, derived from the href's
@@ -592,28 +576,6 @@ export function localeFromPathPrefix(
   }
   const first = pathname.split("/").filter(Boolean)[0];
   return first && locales.includes(first) ? first : null;
-}
-
-/**
- * Drop tracking / ephemeral params from the page key (utm_*, fbclid, session
- * tokens, …); keep functional ones (tab, page, id, …).
- */
-function isSignificantParam(key: string): boolean {
-  const k = key.toLowerCase();
-  if (k.startsWith("utm_")) return false;
-  const drop = new Set([
-    "fbclid",
-    "gclid",
-    "gbraid",
-    "wbraid",
-    "msclkid",
-    "ref",
-    "ref_src",
-    "session",
-    "token",
-    "_ga",
-  ]);
-  return !drop.has(k);
 }
 
 // ───────────────────────────────── helpers ──────────────────────────────────
