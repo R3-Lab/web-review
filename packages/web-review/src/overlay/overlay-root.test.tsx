@@ -19,7 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
@@ -38,7 +38,7 @@ import type {
 } from "../core/types";
 import { captureScreenshot } from "../client/screenshot";
 import { OverlayRoot } from "./overlay-root";
-import type { OverlayRootProps, PanelRenderProps } from "./overlay-root";
+import type { ComposerRenderProps, OverlayRootProps, PanelRenderProps } from "./overlay-root";
 
 // `captureScreenshot` does real rasterization work (dynamic `@zumer/snapdom`
 // import, canvas encode) that jsdom can't perform — mocked here so the
@@ -311,7 +311,7 @@ describe("pin-drop mode", () => {
       },
     );
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await screen.findByText(/select words to pin the copy/i);
 
@@ -359,7 +359,7 @@ describe("pin-drop mode", () => {
       },
     );
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(para);
 
@@ -380,19 +380,21 @@ describe("pin-drop mode", () => {
           captured = props.anchor;
           return null;
         },
+        renderPanel: () => <div data-testid="panel" />,
       },
     );
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    const launcher = await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
-    const cancelToggle = await screen.findByRole("button", { name: /cancel pin-drop mode/i });
+    await screen.findByText(/select words to pin the copy/i);
 
-    await user.click(cancelToggle);
+    await user.click(launcher);
 
     expect(captured).toBeUndefined();
-    // The toggle's own click handler still ran (pin-drop mode exited) —
-    // proof the click reached the button rather than being silently eaten.
-    expect(await screen.findByRole("button", { name: /drop a review pin/i })).toBeInTheDocument();
+    // The launcher's own click handler still ran (the panel opened) — proof
+    // the click reached the button rather than being silently eaten by the
+    // capture handler.
+    expect(await screen.findByTestId("panel")).toBeInTheDocument();
   });
 
   it("does not drop a pin when clicking an editable target", async () => {
@@ -415,7 +417,7 @@ describe("pin-drop mode", () => {
       },
     );
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(input);
 
@@ -454,7 +456,7 @@ describe("pin-drop mode", () => {
       },
     );
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
     const submit = await screen.findByRole("button", { name: /submit draft/i });
@@ -473,6 +475,339 @@ describe("pin-drop mode", () => {
   });
 });
 
+// The bug these cover: the launcher used to call `enterPinDropMode`, so
+// pressing it both opened the panel AND armed picking — a reviewer who only
+// wanted to read existing feedback got a crosshair cursor and a capture scrim
+// over the page. The launcher now opens the panel and nothing else, and the
+// `c` shortcut arms picking and nothing else.
+describe("launcher ⇄ panel decoupling", () => {
+  /**
+   * A mutable box a render-prop stub publishes its payload into, so a test
+   * can assert on values that have no DOM of their own (`panelSide`,
+   * `pinDropMode`, `onTogglePinDrop`). A plain `let` would do, except that
+   * TypeScript narrows a `let` only ever assigned inside a callback, which
+   * would put a cast on every read.
+   */
+  interface Payload<T> {
+    current: T | null;
+  }
+
+  /** A panel stub that both renders something findable and records its payload. */
+  function capturePanel(sink: Payload<PanelRenderProps>) {
+    return (props: PanelRenderProps) => {
+      sink.current = props;
+      return <div data-testid="panel" />;
+    };
+  }
+
+  /** Pin-drop mode's two visible tells: the capture scrim and the hint strip. */
+  function pickingChromeCount() {
+    return document.querySelectorAll(".r3wr-capture, .r3wr-capture-hint").length;
+  }
+
+  it("opens the panel on launcher activation and leaves pin-drop mode disarmed", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    const panel: Payload<PanelRenderProps> = { current: null };
+    renderOverlay({ adapter }, { renderPanel: capturePanel(panel) });
+
+    await user.click(await screen.findByRole("button", { name: "Open the review panel" }));
+
+    expect(await screen.findByTestId("panel")).toBeInTheDocument();
+    expect(panel.current?.pinDropMode).toBe(false);
+    expect(pickingChromeCount()).toBe(0);
+  });
+
+  it("closes the panel when the launcher is activated again", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    renderOverlay({ adapter }, { renderPanel: () => <div data-testid="panel" /> });
+
+    const launcher = await screen.findByRole("button", { name: "Open the review panel" });
+    await user.click(launcher);
+    await screen.findByTestId("panel");
+
+    await user.click(launcher);
+    await waitFor(() => expect(screen.queryByTestId("panel")).toBeNull());
+  });
+
+  it("arms pin-drop mode on 'c' without opening the panel", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    renderOverlay({ adapter }, { renderPanel: () => <div data-testid="panel" /> });
+
+    await screen.findByRole("button", { name: "Open the review panel" });
+    await user.keyboard("c");
+
+    await screen.findByText(/select words to pin the copy/i);
+    expect(screen.queryByTestId("panel")).toBeNull();
+    // And the launcher still offers to OPEN the panel — arming picking has
+    // not touched what that button is for.
+    expect(screen.getByRole("button", { name: "Open the review panel" })).toBeInTheDocument();
+  });
+
+  it("arms and disarms pin-drop mode through the panel's onTogglePinDrop", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    const panel: Payload<PanelRenderProps> = { current: null };
+    renderOverlay({ adapter }, { renderPanel: capturePanel(panel) });
+
+    await user.click(await screen.findByRole("button", { name: "Open the review panel" }));
+    await screen.findByTestId("panel");
+
+    act(() => panel.current?.onTogglePinDrop());
+    await screen.findByText(/select words to pin the copy/i);
+    expect(panel.current?.pinDropMode).toBe(true);
+
+    act(() => panel.current?.onTogglePinDrop());
+    await waitFor(() => expect(pickingChromeCount()).toBe(0));
+    expect(panel.current?.pinDropMode).toBe(false);
+    // Disarming picking is not closing the panel — they are separate axes in
+    // both directions.
+    expect(screen.getByTestId("panel")).toBeInTheDocument();
+  });
+
+  it("renders a composer with the panel shut, since pin-drop mode no longer opens it", async () => {
+    const target = document.createElement("div");
+    target.setAttribute("data-testid", "widget");
+    target.textContent = "A page element";
+    document.body.appendChild(target);
+    stubRect(target, { x: 0, y: 0, w: 200, h: 60 });
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    const composer: Payload<ComposerRenderProps> = { current: null };
+    renderOverlay(
+      { adapter },
+      {
+        renderPanel: () => <div data-testid="panel" />,
+        renderComposer: (props) => {
+          composer.current = props;
+          return null;
+        },
+      },
+    );
+
+    await screen.findByRole("button", { name: "Open the review panel" });
+    await user.keyboard("c");
+    await user.click(target);
+
+    await waitFor(() => expect(composer.current).not.toBeNull());
+    expect(composer.current?.panelOpen).toBe(false);
+    expect(screen.queryByTestId("panel")).toBeNull();
+  });
+
+  it("names the launcher for what it does, carrying the open-thread count while shut", async () => {
+    const adapter = makeAdapter([makeThread({ urlKey: "/" }), makeThread({ urlKey: "/" })]);
+    const user = userEvent.setup();
+    renderOverlay({ adapter }, { renderPanel: () => <div data-testid="panel" /> });
+
+    const launcher = await screen.findByRole("button", {
+      name: "Open the review panel. 2 open on this page",
+    });
+    await user.click(launcher);
+
+    // Same node, renamed: the count goes away because the panel it counts is
+    // now on screen, and the action on offer is the opposite one.
+    expect(await screen.findByRole("button", { name: "Close the review panel" })).toBe(launcher);
+  });
+
+  it("drops the count from the launcher's name when nothing is open on this page", async () => {
+    const adapter = makeAdapter([]);
+    renderOverlay({ adapter });
+
+    expect(await screen.findByRole("button", { name: "Open the review panel" })).toBeInTheDocument();
+  });
+});
+
+describe("launcher docking", () => {
+  /**
+   * jsdom reports no layout at all, so the launcher's box and the viewport
+   * both have to be stated outright — every coordinate in the drag below is
+   * derived from these two. The values match jsdom's own defaults, so there
+   * is nothing for a later test to inherit.
+   */
+  function setViewport(width: number, height: number) {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  }
+
+  it("docks the panel to the side that keeps it clear of the launcher, in both payloads", async () => {
+    const target = document.createElement("div");
+    target.setAttribute("data-testid", "widget");
+    target.textContent = "A page element";
+    document.body.appendChild(target);
+    stubRect(target, { x: 0, y: 0, w: 200, h: 60 });
+    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    let panelSide: string | undefined;
+    let composerSide: string | undefined;
+    renderOverlay(
+      { adapter },
+      {
+        renderPanel: (props) => {
+          panelSide = props.panelSide;
+          return <div data-testid="panel" />;
+        },
+        renderComposer: (props) => {
+          composerSide = props.panelSide;
+          return null;
+        },
+      },
+    );
+
+    const launcher = await screen.findByRole("button", { name: "Open the review panel" });
+    await user.click(launcher);
+    await screen.findByTestId("panel");
+
+    // The launcher starts on the right edge, so the panel stays where it has
+    // always been — this is "move the panel only when staying put would hide
+    // the launcher", not "mirror the launcher".
+    expect(panelSide).toBe("right");
+    expect(document.querySelector(".r3wr-root")).toHaveAttribute("data-panel-side", "right");
+
+    // Arrow keys are the launcher's non-drag docking path (WCAG 2.5.7), and
+    // they need no geometry — the honest way to move it in a DOM with no
+    // layout engine.
+    launcher.focus();
+    await user.keyboard("{ArrowLeft}");
+
+    await waitFor(() => expect(panelSide).toBe("left"));
+    expect(launcher).toHaveAttribute("data-edge", "left");
+    expect(document.querySelector(".r3wr-root")).toHaveAttribute("data-panel-side", "left");
+
+    // And the same side reaches a composer, which clamps itself against it.
+    await user.keyboard("c");
+    await user.click(target);
+    await waitFor(() => expect(composerSide).toBe("left"));
+  });
+
+  // WP9: the panel is an obstacle to the launcher, not just a state of it.
+  // Both dock to a viewport edge, so an open panel can end up underneath the
+  // pill — and in the shipped default (launcher bottom-right, panel right) it
+  // did, over the panel's own keyboard-shortcuts strip. The fix has two
+  // halves; this suite covers `OverlayRoot`'s obligation to both.
+  it("hands the launcher the open panel's dock, and takes it back when the panel shuts", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    renderOverlay({ adapter }, { renderPanel: () => <div data-testid="panel" /> });
+
+    const launcher = await screen.findByRole("button", { name: "Open the review panel" });
+    setViewport(1440, 900);
+    stubRect(launcher, { x: 0, y: 0, w: 132, h: 44 });
+
+    // The bottom edge is where a dock actually constrains the launcher: the
+    // panel is full-height, so a pill travelling a HORIZONTAL edge is the one
+    // that can slide into its column. Arrow keys are the geometry-free way to
+    // get it there (WCAG 2.5.7's non-drag path, reused here as a test seam).
+    launcher.focus();
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(launcher).toHaveAttribute("data-edge", "bottom"));
+
+    // Panel shut: the far end of the 1440 - 132 = 1308px track, one 18px
+    // margin in. Nothing to avoid, so nothing is given up.
+    expect(launcher.style.getPropertyValue("--r3wr-launcher-pos")).toBe("1290px");
+
+    await user.click(launcher);
+    await screen.findByTestId("panel");
+
+    // Panel open: the right-docked panel's 384px column comes off that same
+    // end, leaving the pill's right edge one margin clear of it.
+    await waitFor(() =>
+      expect(launcher.style.getPropertyValue("--r3wr-launcher-pos")).toBe("906px"),
+    );
+
+    // And back again — the clamp is tied to the panel being up, not to
+    // anything the launcher remembers.
+    await user.click(launcher);
+    await waitFor(() => expect(screen.queryByTestId("panel")).toBeNull());
+    expect(launcher.style.getPropertyValue("--r3wr-launcher-pos")).toBe("1290px");
+  });
+
+  // The other half of WP9 is a pair of `overlay.css` rules: a launcher docked
+  // to the SAME side as the panel is stepped inboard by the panel's width, on
+  // an inset no JS value here carries. A DOM test cannot prove that offset —
+  // jsdom applies no stylesheet — so what it proves instead is that the live
+  // DOM really does match the selector those rules are written against. The
+  // offset itself is verified visually, in `docs/images/`.
+  it("carries exactly the attributes the stylesheet's same-edge step-inboard keys on", async () => {
+    const adapter = makeAdapter([]);
+    const user = userEvent.setup();
+    renderOverlay({ adapter }, { renderPanel: () => <div data-testid="panel" /> });
+
+    const launcher = await screen.findByRole("button", { name: "Open the review panel" });
+    const root = document.querySelector(".r3wr-root");
+
+    // Shut, so the rules must not match — `data-panel-open` is the term that
+    // says so, and it has to be present-and-false rather than absent.
+    expect(root).toHaveAttribute("data-panel-open", "false");
+
+    await user.click(launcher);
+    await screen.findByTestId("panel");
+
+    // Open, in the default arrangement: launcher on the right edge, panel
+    // docked right, no drag in flight.
+    expect(
+      document.querySelector(
+        '.r3wr-root[data-panel-open="true"][data-panel-side="right"] .r3wr-toggle[data-edge="right"]:not([data-dragging])',
+      ),
+    ).toBe(launcher);
+
+    // The mirror rule, for a launcher a reviewer has moved to the left edge —
+    // which takes the panel with it (`panelSideForEdge`), so the two collide
+    // there too.
+    launcher.focus();
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() =>
+      expect(root).toHaveAttribute("data-panel-side", "left"),
+    );
+    expect(
+      document.querySelector(
+        '.r3wr-root[data-panel-open="true"][data-panel-side="left"] .r3wr-toggle[data-edge="left"]:not([data-dragging])',
+      ),
+    ).toBe(launcher);
+  });
+
+  it("persists the docked position under the configured prefix and restores it on remount", async () => {
+    const adapter = makeAdapter([]);
+    renderOverlay({ adapter, storagePrefix: "acme" });
+
+    const launcher = await screen.findByRole("button", { name: "Open the review panel" });
+    setViewport(1024, 768);
+    // The suite's stubbed `getBoundingClientRect` reads `data-rect`, so this
+    // is how the pill gets a box worth snapping from.
+    stubRect(launcher, { x: 950, y: 700, w: 132, h: 44 });
+
+    // Grabbed 10px in and 20px down from the pill's top-left and released
+    // with that box at (30, 380) — centre (96, 402), nearest the left edge,
+    // 402/768 of the way down it.
+    fireEvent.pointerDown(launcher, { pointerId: 1, button: 0, clientX: 960, clientY: 720 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 400 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 400 });
+    // The browser fires a click after the release; delivering it is what
+    // exercises (and clears) the launcher's one-shot suppression of it.
+    fireEvent.click(launcher);
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem("acme.launcher")).toBe(
+        JSON.stringify({ edge: "left", offset: 402 / 768 }),
+      ),
+    );
+    // Letting go of the launcher must not also press it.
+    expect(screen.getByRole("button", { name: "Open the review panel" })).toBeInTheDocument();
+    cleanup();
+
+    renderOverlay({ adapter, storagePrefix: "acme" });
+    expect(await screen.findByRole("button", { name: "Open the review panel" })).toHaveAttribute(
+      "data-edge",
+      "left",
+    );
+  });
+});
+
 describe("highlight visibility", () => {
   it("persists the toggle to localStorage under the configured prefix and honours it on remount", async () => {
     const adapter = makeAdapter([]);
@@ -484,10 +819,10 @@ describe("highlight visibility", () => {
 
     const firstUser = userEvent.setup();
     renderOverlay({ adapter, storagePrefix: "acme" }, { renderPanel });
-    // Wait for the gate to reach "unlocked" — the keydown listener isn't
-    // attached until then, so pressing "c" any earlier would be a no-op.
-    await screen.findByRole("button", { name: /drop a review pin/i });
-    await firstUser.keyboard("c"); // enterPinDropMode also opens the panel
+    // The launcher only appears once the gate reaches "unlocked", so finding
+    // it is also the wait — and pressing it is how a reviewer opens the panel
+    // now that the launcher does that and nothing else.
+    await firstUser.click(await screen.findByRole("button", { name: /review panel/i }));
     const toggle = await screen.findByRole("button", { name: /highlights: on/i });
     await firstUser.click(toggle);
     await screen.findByRole("button", { name: /highlights: off/i });
@@ -496,8 +831,7 @@ describe("highlight visibility", () => {
 
     const secondUser = userEvent.setup();
     renderOverlay({ adapter, storagePrefix: "acme" }, { renderPanel });
-    await screen.findByRole("button", { name: /drop a review pin/i });
-    await secondUser.keyboard("c");
+    await secondUser.click(await screen.findByRole("button", { name: /review panel/i }));
     expect(await screen.findByRole("button", { name: /highlights: off/i })).toBeInTheDocument();
   });
 });
@@ -529,7 +863,7 @@ describe("gate", () => {
 
     renderOverlay({ adapter });
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     expect(document.body.querySelector(`[${OVERLAY_ATTR}]`)).not.toBeNull();
   });
 });
@@ -540,7 +874,7 @@ describe("polling", () => {
     const adapter = makeAdapter([]);
     renderOverlay({ adapter });
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     expect(adapter.listThreads).toHaveBeenCalledTimes(1);
 
     const call = setIntervalSpy.mock.calls.find(([, delay]) => delay === 60_000);
@@ -570,7 +904,7 @@ describe("accessibility", () => {
     const user = userEvent.setup();
     renderOverlay({ adapter });
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     const liveRegion = document.querySelector('[role="status"]');
     expect(liveRegion).toBeTruthy();
 
@@ -629,7 +963,7 @@ describe("screenshot lifecycle", () => {
       uploadScreenshot: vi.fn().mockResolvedValue(null),
     });
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
 
@@ -645,7 +979,7 @@ describe("screenshot lifecycle", () => {
       uploadScreenshot: vi.fn().mockResolvedValue("shots/abc123.png"),
     });
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
 
@@ -658,7 +992,7 @@ describe("screenshot lifecycle", () => {
     document.body.appendChild(target);
     const { shotStates, user } = dropPinAndCapture(target, {});
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
 

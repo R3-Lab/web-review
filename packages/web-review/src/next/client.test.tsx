@@ -260,7 +260,7 @@ describe("Next ReviewOverlay: default surfaces wired with no render props", () =
     render(<ReviewOverlay config={{ adapter, enabled: true }} />);
     await flush();
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
 
@@ -278,9 +278,9 @@ describe("Next ReviewOverlay: default surfaces wired with no render props", () =
     render(<ReviewOverlay config={{ adapter, enabled: true }} />);
     await flush();
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
-    // Entering pin-drop mode alone (no click yet) already opens the panel.
-    await user.keyboard("c");
+    // The launcher opens the panel and does nothing else, so activating it
+    // is the whole setup this test needs.
+    await user.click(await screen.findByRole("button", { name: /review panel/i }));
 
     expect(
       await screen.findByRole("heading", { name: /feedback on this page/i }),
@@ -319,7 +319,10 @@ describe("Next ReviewOverlay: default surfaces wired with no render props", () =
     );
     await flush();
 
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    // Open the panel first, via the launcher: dropping a pin no longer opens
+    // it, and this test needs both surfaces on screen at once to tell which
+    // of them the override replaced.
+    await user.click(await screen.findByRole("button", { name: /review panel/i }));
     await user.keyboard("c");
     await user.click(target);
 

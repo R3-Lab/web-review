@@ -1,6 +1,6 @@
 /**
  * Review overlay — shell styles (mount gate chrome, pins, highlights, drift,
- * the pin-drop toggle). `r3wr-` prefixed, self-contained, no Tailwind.
+ * the launcher). `r3wr-` prefixed, self-contained, no Tailwind.
  *
  * Ported from a working single-app review tool's `feedback-overlay.css`
  * ("Modern Dark"), generalized: `afb-` → `r3wr-`, `--fb-*` → `--r3wr-*`. The
@@ -20,10 +20,12 @@
  *    glyph (see `icons.tsx`). Status is orthogonal and encoded by FORM
  *    (filled = open, outlined = resolved), so the two axes never collide.
  *
- * This file covers: root layout + design tokens, the pin-drop toggle, the
- * capture scrim/hint, pins + the draft marker, highlights + the
- * hover-to-select preview, and the screen-reader-only live region — the
- * overlay's shell — plus the side panel, thread cards, thread detail,
+ * This file covers: root layout + design tokens, the launcher (its look, and
+ * its docking to any of the four viewport edges), the capture scrim/hint,
+ * pins + the draft marker, highlights + the hover-to-select preview, and the
+ * screen-reader-only live region — the overlay's shell — plus the side panel
+ * (docked to either side, following the launcher), its "New comment" control
+ * and keyboard-shortcuts strip, thread cards, thread detail,
  * composer/field/button primitives, the category picker, the spinner, the
  * narrow-screen bottom-sheet layout, and the `afb-pop`/`afb-slide-in`/
  * `afb-sheet-in` keyframes those surfaces animate with.
@@ -150,7 +152,12 @@
     transform var(--r3wr-t-out);
 }
 
-/* ── Toggle button (pin-drop mode / locked launcher) ─────────────────────── */
+/* ── Toggle button (the launcher: open the panel / unlock) ───────────────── */
+/* This button no longer arms pin-drop mode, so it no longer has an "armed"
+   treatment: it opens the panel and nothing else, and `aria-expanded` carries
+   that state. The accent it used to take while picking now belongs to the
+   panel's own `.r3wr-new-comment` control, further down this file — the one
+   primary action on the one surface that has one. */
 .r3wr-root .r3wr-toggle {
   position: fixed;
   bottom: calc(18px + env(safe-area-inset-bottom));
@@ -179,13 +186,6 @@
   opacity: 0.6;
   cursor: progress;
 }
-/* Pin-drop mode is the ONE place the accent appears on the toggle. */
-.r3wr-root .r3wr-toggle[data-active="true"] {
-  background: var(--r3wr-accent);
-  color: var(--r3wr-accent-fg);
-  border-color: var(--r3wr-accent);
-  font-weight: 700;
-}
 .r3wr-root .r3wr-toggle-count {
   display: inline-flex;
   align-items: center;
@@ -198,10 +198,6 @@
   color: var(--r3wr-fg);
   font-size: 11px;
   font-weight: 700;
-}
-.r3wr-root .r3wr-toggle[data-active="true"] .r3wr-toggle-count {
-  background: var(--r3wr-accent-fg);
-  color: var(--r3wr-accent);
 }
 
 /* ── Pin-drop cursor ─────────────────────────────────────────────────────── */
@@ -464,13 +460,26 @@ body.r3wr-picking {
  * `.r3wr-root`, no Tailwind, category never hue-only, px not rem). */
 
 /* ── Side panel ──────────────────────────────────────────────────────────── */
+/* The docked panel's width, as a custom property because three places need
+   the same number and drift between them is a real defect, not a tidiness
+   concern: the panel itself, the launcher's step-inboard rules at the bottom
+   of this file, and — mirrored in TypeScript, since neither of those can read
+   a stylesheet — `./panel-geometry.ts`, which `./composer.tsx` and
+   `./launcher-position.ts` both clamp against. A change here is a change
+   there.
+   `min()` rather than the `width` + `max-width` pair it replaces so the whole
+   answer is one value the other rules can add to; the two forms compute
+   identically. It only applies while the panel IS a column — below 560px the
+   narrow-screen block overrides it outright with a full-width sheet. */
+.r3wr-root {
+  --r3wr-panel-w: min(384px, 94vw);
+}
 .r3wr-root .r3wr-panel {
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 384px;
-  max-width: 94vw;
+  width: var(--r3wr-panel-w);
   display: flex;
   flex-direction: column;
   background: var(--r3wr-bg);
@@ -479,6 +488,24 @@ body.r3wr-picking {
   box-shadow: var(--r3wr-shadow);
   pointer-events: auto;
   animation: r3wr-slide-in var(--r3wr-t-in) both;
+}
+/* The panel follows the launcher so it never covers the button that opened
+   it (`panelSideForEdge` in `./launcher-position.ts`; `Panel` writes the
+   result as `data-side`). Right is the default above, so only the left case
+   needs stating — and it needs three things, not one: the inset flips, the
+   BORDER flips with it so the divider still faces the page rather than the
+   viewport edge, and the entry animation is mirrored, since sliding in from
+   the right is visibly wrong for a panel that arrives on the left.
+   Reduced motion needs no extra guard here: `r3wr-slide-in-left` is an
+   animation on a `.r3wr-root` descendant, which this file's global
+   `prefers-reduced-motion` block already crushes to 0.001ms alongside every
+   other one. */
+.r3wr-root .r3wr-panel[data-side="left"] {
+  left: 0;
+  right: auto;
+  border-left: none;
+  border-right: 1px solid var(--r3wr-border-strong);
+  animation-name: r3wr-slide-in-left;
 }
 .r3wr-root .r3wr-panel-header {
   display: flex;
@@ -520,6 +547,99 @@ body.r3wr-picking {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--r3wr-fg);
+}
+
+/* ── "New comment" (the panel's one primary action) ──────────────────────── */
+/* Inherits the accent the launcher used to take while it was armed. It sits
+   between the header and the body — outside the body's own scroll container —
+   so the action never scrolls away under the feedback it exists to add to. */
+.r3wr-root .r3wr-new-comment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 2px solid var(--r3wr-accent);
+  background: var(--r3wr-accent);
+  color: var(--r3wr-accent-fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.r3wr-root .r3wr-new-comment:hover {
+  background: #16a34a;
+  border-bottom-color: #16a34a;
+}
+/* Pushes the shortcut hint to the far end, so the label and the key never
+   read as one run of text. */
+.r3wr-root .r3wr-new-comment kbd {
+  margin-left: auto;
+}
+/* Armed. The state is not carried by hue: `aria-pressed` carries it for
+   assistive tech, the button's own word changes to "Cancel", and the fill
+   goes hollow with a DASHED edge — the same filled/outlined convention the
+   pins use for status, and the same dashed "not committed yet" form as the
+   draft pin. */
+.r3wr-root .r3wr-new-comment[aria-pressed="true"] {
+  background: var(--r3wr-surface);
+  color: var(--r3wr-accent);
+  border-bottom: 2px dashed var(--r3wr-accent);
+}
+.r3wr-root .r3wr-new-comment[aria-pressed="true"]:hover {
+  background: var(--r3wr-surface-2);
+}
+
+/* ── Keyboard shortcuts strip ────────────────────────────────────────────── */
+/* Pinned at the bottom of the panel, after `.r3wr-panel-body` — reference
+   material, so it reads quieter than everything above it, but it is text a
+   reviewer has to be able to READ, so it stays on the muted token rather
+   than inventing a dimmer one. */
+.r3wr-root .r3wr-shortcuts {
+  flex: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--r3wr-border);
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg-muted);
+}
+.r3wr-root .r3wr-shortcuts ul {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.r3wr-root .r3wr-shortcuts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+/* The four arrows are ONE shortcut, so they group tighter than the gap
+   between a shortcut and its label. */
+.r3wr-root .r3wr-shortcuts .r3wr-keys {
+  display: inline-flex;
+  gap: 3px;
+}
+
+/* Key caps, matching `.r3wr-capture-hint kbd` — a key looks the same
+   wherever the overlay names one. */
+.r3wr-root .r3wr-new-comment kbd,
+.r3wr-root .r3wr-shortcuts kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--r3wr-border-strong);
+  border-radius: 4px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .r3wr-root .r3wr-icon-btn {
@@ -972,6 +1092,14 @@ body.r3wr-picking {
     transform: translateX(16px);
   }
 }
+/* The mirror of the above, for a left-docked panel — it has to come FROM the
+   edge it docks to, not from the opposite one. */
+@keyframes r3wr-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
 @keyframes r3wr-pop {
   from {
     opacity: 0;
@@ -1001,7 +1129,13 @@ body.r3wr-picking {
 /* The panel becomes a bottom sheet so it never swallows the page it
    annotates, and never overflows horizontally. */
 @media (max-width: 560px) {
-  .r3wr-root .r3wr-panel {
+  /* `[data-side]` is meaningless for a full-width sheet, so the left-dock
+     rule is named explicitly here rather than left to lose on specificity —
+     it is a class + a class + an attribute, and this rule without it is one
+     selector short. Same declarations either way; the second selector exists
+     purely so the docking rules cannot leak in and re-introduce a side. */
+  .r3wr-root .r3wr-panel,
+  .r3wr-root .r3wr-panel[data-side="left"] {
     top: auto;
     left: 0;
     right: 0;
@@ -1009,6 +1143,7 @@ body.r3wr-picking {
     width: 100%;
     max-width: 100%;
     border-left: none;
+    border-right: none;
     border-top: 1px solid var(--r3wr-border-strong);
     border-radius: 14px 14px 0 0;
     animation: r3wr-sheet-in var(--r3wr-t-in) both;
@@ -1023,5 +1158,153 @@ body.r3wr-picking {
     /* Width is handled by the single `min()` rule above — only the height
        needs narrowing here, to keep the composer clear of the bottom sheet. */
     max-height: min(calc(100vh - 16px), 60vh);
+  }
+}
+
+/* ── Launcher docking ────────────────────────────────────────────────────── */
+/* Where the launcher SITS, and how it behaves while it's being moved. The
+   toggle block near the top of this file still owns how it LOOKS (the pill,
+   the 44px touch height, the border, the shadow, the count badge) — none of
+   that changes here.
+
+   The launcher used to be nailed to the bottom-right corner, which is exactly
+   where host sites put their own floating chrome. It can now be dragged to
+   any edge, so placement is driven by two things `./launcher.tsx` writes onto
+   the button:
+     `data-edge`             which edge it is docked against
+     `--r3wr-launcher-pos`   how far along that edge, already resolved to px
+                             by `./launcher-position.ts`'s `offsetToPx`
+   Each edge rule sets ONE perpendicular inset, puts the custom property on
+   the along-edge axis, and forces the other two insets back to `auto`. That
+   last part is the whole reason these are four rules rather than one: without
+   the explicit resets, a launcher moved from the bottom edge to the left
+   would keep its old `bottom` and dock to the bottom-left corner forever.
+
+   These rules come after the toggle block deliberately — they are no more
+   specific than it is, so they win on order alone. */
+
+.r3wr-root .r3wr-toggle {
+  /* A touch drag must move the launcher, not scroll the page under it. */
+  touch-action: none;
+  cursor: grab;
+  /* Restating the shared `.r3wr-root button` transition, not extending it:
+     `transition` is a shorthand, so this rule would otherwise drop the
+     colour/press feedback every other control gets. `top`/`left` carry the
+     along-edge travel on all four edges, so they are the whole of the snap
+     animation. `right` is here for one case only — a right-docked launcher
+     stepping inboard of an opening panel — where it is the inset that moves;
+     an edge CHANGE never animates it, since the inset it is swapping with is
+     `auto` and `auto` does not interpolate. */
+  transition:
+    background-color var(--r3wr-t-out),
+    border-color var(--r3wr-t-out),
+    color var(--r3wr-t-out),
+    transform var(--r3wr-t-out),
+    top var(--r3wr-t-in),
+    left var(--r3wr-t-in),
+    right var(--r3wr-t-in);
+}
+
+.r3wr-root .r3wr-toggle[data-edge="left"] {
+  left: calc(18px + env(safe-area-inset-left));
+  top: var(--r3wr-launcher-pos, 18px);
+  right: auto;
+  bottom: auto;
+}
+.r3wr-root .r3wr-toggle[data-edge="right"] {
+  right: calc(18px + env(safe-area-inset-right));
+  top: var(--r3wr-launcher-pos, 18px);
+  left: auto;
+  bottom: auto;
+}
+.r3wr-root .r3wr-toggle[data-edge="top"] {
+  top: calc(18px + env(safe-area-inset-top));
+  left: var(--r3wr-launcher-pos, 18px);
+  right: auto;
+  bottom: auto;
+}
+.r3wr-root .r3wr-toggle[data-edge="bottom"] {
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: var(--r3wr-launcher-pos, 18px);
+  top: auto;
+  right: auto;
+}
+
+/* Being carried. `./launcher.tsx` writes inline `left`/`top` in viewport px
+   that follow the pointer; inline styles beat the edge rules above on the two
+   axes they set, but `right`/`bottom` are stylesheet-only and would stretch a
+   shrink-to-fit box between opposing insets, so they are reset here. Motion
+   is switched off for the same reason a dragged window doesn't ease: a
+   transition on `top`/`left` would make the pill lag the cursor, and
+   `r3wr-rise`'s `both` fill would keep re-applying its entry transform. */
+.r3wr-root .r3wr-toggle[data-dragging="true"] {
+  right: auto;
+  bottom: auto;
+  cursor: grabbing;
+  animation: none;
+  transition: none;
+}
+
+/* Preserves the bottom-sheet clearance the narrow-screen block above gives
+   the launcher, which those rules can no longer express on their own now that
+   `[data-edge="bottom"]` sets `bottom` later in the cascade. Only the bottom
+   edge can collide with the sheet; the other three clear it already. The
+   `70vh` mirrors `.r3wr-panel`'s own height in that block — the two must
+   agree. */
+@media (max-width: 560px) {
+  .r3wr-root[data-panel-open="true"] .r3wr-toggle[data-edge="bottom"] {
+    bottom: calc(70vh + 12px);
+  }
+}
+
+/* Out of the open panel's way, on a wide viewport.
+   The panel docks to whichever side keeps it off the launcher, which means a
+   launcher docked to THAT side sits directly on top of it — and in the
+   default arrangement (both on the right) that is precisely where the panel's
+   `.r3wr-shortcuts` strip is pinned, so the pill swallowed a line of text a
+   reviewer has to be able to read. Stepping the launcher inboard by the
+   panel's own width parks it just beside the dock instead. It is never
+   hidden: the launcher is the control that closes the panel again.
+
+   Why this half is CSS and the other half is not. Here the fix is a bigger
+   value for an inset the rule already sets, so it composes with
+   `env(safe-area-inset-*)` — which no script can read. The along-edge case (a
+   launcher travelling the top or bottom edge, which crosses the panel's
+   column rather than sharing a side with it) needs the pill's measured WIDTH,
+   which no stylesheet can know, so it lives in `./launcher-position.ts`'s
+   `offsetToPx` instead. The two never both apply: they are keyed on disjoint
+   `data-edge` values.
+
+   `:not([data-dragging])` is load-bearing, not defensive. These selectors are
+   more specific than the `[data-dragging="true"]` rule above, so without it a
+   launcher picked up while the panel is open would keep this `right`/`left`
+   alongside the inline `left`/`top` the drag writes, and the pill would be
+   stretched between two opposing insets.
+
+   Wide viewports only, deliberately. At 560px and below the panel is a
+   full-width bottom sheet rather than a column; the narrow-screen block above
+   already lifts the launcher over it VERTICALLY, and adding a side-dock
+   offset on top of that would shove the pill off the side of a phone. The
+   tightest case this rule does cover is just above the breakpoint: 561px less
+   the 384px panel leaves 177px, which comfortably holds the ~132-150px pill
+   and its 18px margin, so it stays fully on screen. */
+@media (min-width: 561px) {
+  .r3wr-root[data-panel-open="true"][data-panel-side="right"]
+    .r3wr-toggle[data-edge="right"]:not([data-dragging]) {
+    right: calc(18px + var(--r3wr-panel-w) + env(safe-area-inset-right));
+  }
+  .r3wr-root[data-panel-open="true"][data-panel-side="left"]
+    .r3wr-toggle[data-edge="left"]:not([data-dragging]) {
+    left: calc(18px + var(--r3wr-panel-w) + env(safe-area-inset-left));
+  }
+}
+
+/* Reduced motion: no snap animation at all. The file's own global guard
+   earlier already crushes every transition here to 0.001ms; this restates the
+   intent locally so this section is correct read on its own, rather than
+   depending on a block several hundred lines up. */
+@media (prefers-reduced-motion: reduce) {
+  .r3wr-root .r3wr-toggle {
+    transition: none;
   }
 }

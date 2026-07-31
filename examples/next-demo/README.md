@@ -102,9 +102,18 @@ deployment would implement `putScreenshot` against R2/S3/etc.
 real build of this app and a real (throwaway) Postgres — no mocking. It
 covers unlock, pin drop → composer → submit, persistence straight from
 Postgres, a pin surviving a page reload re-anchored to the same element,
-text-selection anchoring, reply/resolve, drift, and that the overlay costs
-nothing (no DOM, no requests, chunk never fetched) when
-`NEXT_PUBLIC_REVIEW_ENABLED` is unset at build time.
+text-selection anchoring, reply/resolve, drift, the split between the
+launcher (which opens the panel) and pin-drop mode (armed by `c` or the
+panel's own **New comment** button, never by the launcher), where the
+launcher docks when it is dragged or arrow-keyed to another edge and that it
+stays there across a reload, and that the overlay never *runs* when
+`NEXT_PUBLIC_REVIEW_ENABLED` is unset at build time — no overlay DOM, no
+requests to `/api/review/*`. That last one is a guarantee about execution,
+not about download: whether the chunk's bytes reach the browser is the
+consuming bundler's business, and Turbopack's production builds can ship them
+in the initial HTML regardless of the closed gate, so the suite records whether
+the chunk was requested instead of asserting it wasn't — see "Bundle cost"
+in the root README.
 
 ```sh
 pnpm e2e   # from the repo root, or `pnpm -F next-demo e2e` from anywhere

@@ -6,7 +6,7 @@
 
 import { test, expect } from "@playwright/test";
 import { commentsForThread, findThreadsByCommentMarker } from "./db";
-import { dropElementPin, expectSingle, marker, unlock } from "./helpers";
+import { dropElementPin, expectSingle, marker, openPanel, unlock } from "./helpers";
 
 test.describe("reply and resolve", () => {
   test.beforeEach(async ({ page }) => {
@@ -34,8 +34,14 @@ test.describe("reply and resolve", () => {
     await panel.getByRole("button", { name: "Close the review panel" }).click();
     await expect(panel).toHaveCount(0);
 
-    await page.keyboard.press("c");
-    await page.keyboard.press("Escape"); // leaves pin-drop mode, panel stays open on the list
+    // Re-open it the only way a reviewer can now: the launcher. This used to
+    // press "c" and then Escape, which worked back when arming pin-drop mode
+    // also opened the panel — it no longer does either job for the other, so
+    // that sequence now leaves the panel shut. Re-opening lands on the
+    // DETAIL view of the thread just created (closing the panel doesn't
+    // clear the selection), so step back to the list explicitly.
+    await openPanel(page);
+    await page.getByRole("dialog", { name: "Thread" }).getByRole("button", { name: "All feedback" }).click();
     const list = page.getByRole("dialog", { name: "Feedback on this page" });
     await expect(list).toBeVisible();
     await list.locator(".r3wr-thread", { hasText: title }).click();

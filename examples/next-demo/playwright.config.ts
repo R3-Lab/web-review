@@ -51,33 +51,34 @@ export default defineConfig({
         // (project-level `use` merges per-key; last write wins) and
         // silently discard this override.
         //
-        // Two real layout bugs found while writing this suite, worked
-        // around here rather than in the component code (out of this
-        // suite's scope) — see the task write-up for screenshots:
+        // The panel and the composer are independent surfaces that are
+        // routinely open AT THE SAME TIME here — `launcher-panel.spec.ts`
+        // arms pin-drop from the panel's own "New comment" button, so the
+        // panel is still docked when the composer opens — and the panel
+        // (`.r3wr-panel`) is a fixed 384px dock laid OVER the page, not a
+        // column beside it. Both dimensions exist so those two surfaces
+        // and the page underneath them stay usable simultaneously:
         //
-        //  1. Width: the composer (`composer.tsx`) and the ALWAYS-open
-        //     review panel (`.r3wr-panel`, a fixed 384px dock on the
-        //     right — `enterPinDropMode` opens it unconditionally) don't
-        //     know about each other's position, so a composer opened
-        //     while the panel is showing can render partially or fully
-        //     BEHIND the panel, its submit button unreachable. The demo's
-        //     content container caps at `860px` (`app/globals.css`); at
-        //     1800px viewport width the centered container's right edge
-        //     sits safely clear of the panel's left edge (~90px margin)
-        //     regardless of where in the page a pin is dropped.
-        //  2. Height: the composer's `top` clamp
-        //     (`Math.min(vy + 16, window.innerHeight - 160)`) only
-        //     guarantees ~160px of headroom below the click point, but
-        //     the composer's actual content is routinely ~450-550px tall.
-        //     For an element near the bottom of the page, scrolling can
-        //     bring it AT MOST to within `documentHeight - elementY` of
-        //     the viewport's bottom — for this demo's CTA buttons that is
-        //     only ~117px, no matter how the viewport is sized, AS LONG
-        //     AS the page still scrolls at all. Making the viewport
-        //     TALLER than the page's total height (~1387px at the time of
-        //     writing) removes scrolling from the equation entirely: every
-        //     element then sits at its fixed, unscrolled document
-        //     position, which leaves genuine headroom below it.
+        //  1. Width: the demo's content container caps at `860px` and is
+        //     centered (`app/globals.css`), so at 1800px its edges land at
+        //     470/1330 while the dock takes 1416-1800 (or 0-384) — ~86px
+        //     of clearance, and the SAME ~86px on either side, which
+        //     matters now that the panel follows the draggable launcher to
+        //     whichever edge it was left on (`launcher-position.spec.ts`
+        //     drives it to the left one and asserts the dock lands there).
+        //     Narrower, and the dock starts covering the very elements
+        //     these specs click; the composer's own clamp would also begin
+        //     dragging it away from its anchor, since `panelReservedWidth`
+        //     (`composer.tsx`) subtracts the dock's full width from the
+        //     space the composer is allowed to occupy.
+        //  2. Height: 2000px is taller than the whole demo page (~1387px
+        //     at the time of writing), so it never scrolls. Every target
+        //     sits at its fixed, unscrolled document position, and the
+        //     composer — `position: fixed`, opening 16px below the click
+        //     point and ~450-550px tall — fits below it without
+        //     `clampComposerPosition`'s `maxTop`
+        //     (`innerHeight - composerHeight - 8`, ~1492px here) ever
+        //     engaging and pulling it back off its anchor.
         viewport: { width: 1800, height: 2000 },
       },
     },

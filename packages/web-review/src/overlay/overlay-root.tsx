@@ -14,9 +14,14 @@
  *   - loading + polling threads for the current page
  *   - resolving every thread's anchor against the live DOM each render
  *   - pin-drop mode: the "c" shortcut, click capture, text-selection capture
+ *   - whether the panel is open — an axis of its own, independent of
+ *     pin-drop mode (see the differences section below)
  *   - pin + highlight rendering (via `./pin`, `./thread-highlight`)
  *   - the draft anchor, screenshot capture, and thread/reply/status writes
  *   - the highlight-visibility toggle (persisted)
+ *   - where the launcher is docked: its state, its persistence, and the
+ *     `panelSide` derived from it (component in `./launcher`, model and
+ *     storage round trip in `./launcher-position`)
  *   - the ARIA live region
  *
  * `Composer` / `Panel` / `ThreadDetail` / `UnlockDialog` are plugged in via
@@ -40,6 +45,29 @@
  *  - Screenshot upload goes through `config.adapter.uploadScreenshot`
  *    (present only when `config.screenshots` resolved `true`) instead of a
  *    hardcoded API call.
+ *  - The launcher no longer arms pin-drop mode, and pin-drop mode no longer
+ *    opens the panel. The reference had one button doing both jobs, so a
+ *    reviewer who only wanted to READ the feedback already on the page was
+ *    put into picking mode as well — crosshair cursor, capture scrim, every
+ *    click on the host page swallowed. Here the launcher opens the panel and
+ *    nothing else; arming is an explicit act, either the panel's own control
+ *    (`PanelRenderProps.onTogglePinDrop`) or the `c` shortcut. `c` stopping
+ *    short of opening the panel is the same separation pointing the other
+ *    way: someone who wants to pin something has not asked to read the list.
+ *    The one place the two still meet is `submitThread`, which opens the
+ *    panel on the thread it just created — that is showing a reviewer the
+ *    result of what they did, not a mode being forced on them.
+ *  - The launcher is draggable to any viewport edge instead of being nailed
+ *    to the bottom-right corner, which on a real site is contested ground
+ *    (chat widgets, cookie banners). `OverlayRoot` holds that position and
+ *    persists it; `./launcher-position` owns the model and the geometry. The
+ *    panel docks to whichever side keeps it off the launcher — `panelSide`,
+ *    published to both panel surfaces and written to the chrome wrapper as
+ *    `data-panel-side` for the stylesheet. The obligation runs both ways:
+ *    with the panel up, the launcher is also handed that side as a `dock` so
+ *    it can move out of the panel's column rather than sit on top of its
+ *    shortcuts strip. Whether the panel is up at all is carried by
+ *    `data-panel-open` on the same wrapper.
  */
 
 import type { ReactNode } from "react";
@@ -67,7 +95,6 @@ import type {
 import { ensureIdentity, getIdentity } from "../client/identity";
 import { captureScreenshot } from "../client/screenshot";
 import { useLocation } from "../client/use-location";
-import { KeyRoundIcon, MessageSquarePlusIcon } from "./icons";
 import {
   isEditableTarget,
   LiveRegion,
@@ -76,6 +103,13 @@ import {
   writeShowHighlights,
 } from "./helpers";
 import type { DocRect } from "./helpers";
+import { Launcher } from "./launcher";
+import {
+  panelSideForEdge,
+  readLauncherPosition,
+  writeLauncherPosition,
+} from "./launcher-position";
+import type { LauncherPosition, PanelSide } from "./launcher-position";
 import { DraftPin, Pin } from "./pin";
 import { ThreadHighlight } from "./thread-highlight";
 
@@ -142,16 +176,24 @@ export interface ComposerRenderProps {
   /** Lifecycle of the screenshot capture kicked off at pin-drop. */
   shotState: ShotState;
   /**
-   * Whether `.r3wr-panel` is currently rendered alongside the composer —
-   * `enterPinDropMode` always opens it before a pin can be dropped, so this
-   * is normally `true` for a composer's whole lifetime, but a reviewer can
-   * close the panel via its own header button while the draft is still
-   * open, so the composer must read this rather than assume it. On a wide
-   * viewport the panel docks 384px along the right edge; the composer needs
-   * this to keep its own position (and the submit button in particular)
-   * from landing underneath it.
+   * Whether `.r3wr-panel` is currently rendered alongside the composer.
+   * Neither value is the normal case: the panel is a separate axis from
+   * pin-drop mode, so a reviewer who armed picking with the `c` shortcut
+   * drops a pin with the panel shut, one who armed it from the panel's own
+   * control drops a pin with the panel open, and either of them can flip
+   * that mid-draft from the launcher or the panel's close button. The
+   * composer must read this every render rather than assume either state.
+   * On a wide viewport the panel docks 384px along one edge; the composer
+   * needs this (with {@link ComposerRenderProps.panelSide}) to keep its own
+   * position — the submit button in particular — out from underneath it.
    */
   panelOpen: boolean;
+  /**
+   * Which side `.r3wr-panel` is docked to right now, so a composer that
+   * clamps itself clear of the panel reserves space on the correct edge.
+   * Follows the launcher — see `panelSideForEdge` in `./launcher-position`.
+   */
+  panelSide: PanelSide;
   /** Dismiss the draft without creating a thread (also bound to Escape). */
   onCancel: () => void;
   /**
@@ -198,8 +240,18 @@ export interface PanelRenderProps {
   /** `selected`'s live anchor resolution, for a drift note in the detail view. */
   selectedResolved: ResolveResult | undefined;
   identity: ReviewerIdentity | null;
+  /** Which side the panel docks to. Follows the launcher; see `panelSideForEdge`. */
+  panelSide: PanelSide;
   showHighlights: boolean;
   onToggleHighlights: () => void;
+  /** Whether pin-drop mode is currently armed, so the panel's own control can reflect it. */
+  pinDropMode: boolean;
+  /**
+   * Toggle pin-drop mode. This is now the panel's job: the launcher opens the
+   * panel and nothing else, so the panel owns the explicit "add a comment"
+   * action (the `c` shortcut remains a second path to the same toggle).
+   */
+  onTogglePinDrop: () => void;
   onClose: () => void;
   /** Select a thread by id — fetches its full comment list and opens the panel. */
   onSelect: (id: string) => void;
@@ -253,6 +305,9 @@ export function OverlayRoot({
   const [showHighlights, setShowHighlights] = useState(() =>
     readShowHighlights(config.storagePrefix),
   );
+  const [launcherPosition, setLauncherPosition] = useState(() =>
+    readLauncherPosition(config.storagePrefix),
+  );
   const [hover, setHover] = useState<HoverPreview | null>(null);
 
   const [threads, setThreads] = useState<ReviewThreadView[]>([]);
@@ -291,6 +346,28 @@ export function OverlayRoot({
       return next;
     });
   }, [config]);
+
+  /**
+   * Commit a launcher move: state, then storage, so the position survives a
+   * reload the way the reviewer left it.
+   *
+   * The stable identity is load-bearing rather than hygiene — `Launcher`
+   * mounts the drag's `pointermove`/`pointerup` listeners in an effect keyed
+   * on this callback, so a fresh function on every render would tear those
+   * listeners down and re-attach them on every frame of a drag.
+   */
+  const onLauncherPositionChange = useCallback(
+    (next: LauncherPosition) => {
+      setLauncherPosition(next);
+      writeLauncherPosition(config.storagePrefix, next);
+    },
+    [config],
+  );
+
+  // Which side the panel docks to, so it never covers the launcher the
+  // reviewer just pressed. Derived, never stored: the launcher's edge is the
+  // single source of truth, and a second copy could only ever disagree.
+  const panelSide = panelSideForEdge(launcherPosition.edge);
 
   // ── the gate: one probe decides locked / unlocked / feature-off ───────────
   const probe = useCallback(
@@ -394,9 +471,16 @@ export function OverlayRoot({
   }, [gate, bump]);
 
   // ── pin-drop mode ──────────────────────────────────────────────────────────
+  // Deliberately does NOT open the panel. Arming picking and reading the
+  // feedback already on the page are two different intentions, and binding
+  // them together meant neither could be expressed alone: a reviewer who
+  // pressed the launcher to look at the thread list got a crosshair cursor
+  // and a capture scrim over the page as well. The launcher now opens the
+  // panel; this only arms picking. `setSelectedId(null)` stays because the
+  // detail view of some older thread is not what a reviewer about to pin
+  // something new is looking at.
   const enterPinDropMode = useCallback(() => {
     setPinDropMode(true);
-    setPanelOpen(true);
     setSelectedId(null);
     announce("Pin-drop mode on. Select text or click an element to drop a pin. Press Escape to cancel.");
   }, [announce]);
@@ -406,6 +490,12 @@ export function OverlayRoot({
     pendingSelection.current = null;
     announce("Pin-drop mode off.");
   }, [announce]);
+
+  /** The explicit arm/disarm the panel's own control and the `c` shortcut share. */
+  const togglePinDropMode = useCallback(() => {
+    if (pinDropMode) exitPinDropMode();
+    else enterPinDropMode();
+  }, [pinDropMode, enterPinDropMode, exitPinDropMode]);
 
   const cancelDraft = useCallback(() => {
     setDraft(null);
@@ -483,12 +573,14 @@ export function OverlayRoot({
       // The composer is open; "c" must not re-arm picking underneath it.
       if (draft) return;
       e.preventDefault();
-      if (pinDropMode) exitPinDropMode();
-      else enterPinDropMode();
+      // The shortcut arms and disarms picking, and does nothing else — in
+      // particular it does not open the panel, exactly as the launcher does
+      // not arm picking.
+      togglePinDropMode();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [gate, pinDropMode, draft, panelOpen, unlockOpen, enterPinDropMode, exitPinDropMode, cancelDraft]);
+  }, [gate, pinDropMode, draft, panelOpen, unlockOpen, togglePinDropMode, exitPinDropMode, cancelDraft]);
 
   // Crosshair cursor while picking. The capture scrim is `pointer-events:
   // none` (clicks and text selection must reach the page), so it can't carry
@@ -720,24 +812,19 @@ export function OverlayRoot({
             },
           })}
         <div className="r3wr-interactive" {...TAG}>
-          <button
-            type="button"
-            className="r3wr-toggle"
-            data-locked="true"
-            {...TAG}
-            disabled={gate === "checking"}
-            aria-haspopup="dialog"
-            aria-expanded={unlockOpen}
-            aria-label={
+          <Launcher
+            variant={gate === "checking" ? "checking" : "locked"}
+            expanded={unlockOpen}
+            onActivate={() => setUnlockOpen((open) => !open)}
+            label={
               gate === "checking"
                 ? "Checking review access"
                 : "Review is locked — enter the review password"
             }
-            onClick={() => setUnlockOpen((open) => !open)}
-          >
-            <KeyRoundIcon size={16} />
-            <span>Review</span>
-          </button>
+            position={launcherPosition}
+            onPositionChange={onLauncherPositionChange}
+            tag={TAG}
+          />
         </div>
       </div>,
       document.body,
@@ -801,7 +888,7 @@ export function OverlayRoot({
       </div>
 
       {/* Viewport-fixed chrome. */}
-      <div className="r3wr-root" data-panel-open={panelOpen} {...TAG}>
+      <div className="r3wr-root" data-panel-open={panelOpen} data-panel-side={panelSide} {...TAG}>
         <LiveRegion message={announcement} className="r3wr-sr-only" tag={TAG} />
 
         {pinDropMode && (
@@ -829,6 +916,7 @@ export function OverlayRoot({
             identity,
             shotState,
             panelOpen,
+            panelSide,
             onCancel: cancelDraft,
             onSubmit: submitThread,
             onUnlocked,
@@ -844,8 +932,11 @@ export function OverlayRoot({
             selected,
             selectedResolved: selected ? resolvedByThread.get(selected.id) : undefined,
             identity,
+            panelSide,
             showHighlights,
             onToggleHighlights: toggleShowHighlights,
+            pinDropMode,
+            onTogglePinDrop: togglePinDropMode,
             onClose: () => setPanelOpen(false),
             onSelect: onSelectThread,
             onBack: () => setSelectedId(null),
@@ -855,32 +946,46 @@ export function OverlayRoot({
           })}
 
         <div className="r3wr-interactive" {...TAG}>
-          <button
-            type="button"
-            className="r3wr-toggle"
-            data-active={pinDropMode}
-            {...TAG}
-            aria-pressed={pinDropMode}
-            aria-label={
-              pinDropMode
-                ? "Cancel pin-drop mode (shortcut: C)"
-                : `Drop a review pin (shortcut: C). ${openCount} open on this page`
-            }
-            onClick={() => (pinDropMode ? exitPinDropMode() : enterPinDropMode())}
-          >
-            <MessageSquarePlusIcon size={16} />
-            <span>Review</span>
-            {openCount > 0 && (
-              <span className="r3wr-toggle-count" {...TAG} aria-hidden="true">
-                {openCount}
-              </span>
-            )}
-          </button>
+          <Launcher
+            variant="unlocked"
+            count={openCount}
+            expanded={panelOpen}
+            onActivate={() => setPanelOpen((open) => !open)}
+            // The name describes what pressing this does — open or close the
+            // panel — and nothing else. It used to advertise the `c` shortcut
+            // because it also armed pin-drop mode; that job has moved to the
+            // panel's own control, and so has the shortcut's advertisement.
+            label={launcherLabel(panelOpen, openCount)}
+            position={launcherPosition}
+            onPositionChange={onLauncherPositionChange}
+            // The panel is an obstacle only while it is up, so this is the
+            // dock or nothing — `Launcher` reads `undefined` as "no column to
+            // avoid" rather than needing a second `panelOpen` prop that could
+            // disagree with it. `panelSide` is the same value the panel and
+            // the composer are handed, and the same one `data-panel-side`
+            // above carries for the stylesheet's half of this fix.
+            dock={panelOpen ? { side: panelSide } : undefined}
+            tag={TAG}
+          />
         </div>
       </div>
     </>,
     document.body,
   );
+}
+
+/**
+ * The unlocked launcher's accessible name.
+ *
+ * Three cases rather than two because the open-thread count is worth saying
+ * only when there is something to open and something in it — appending
+ * "0 open on this page" to an invitation reads as a discouragement, and once
+ * the panel is open the reviewer can see the count for themselves.
+ */
+function launcherLabel(panelOpen: boolean, openCount: number): string {
+  if (panelOpen) return "Close the review panel";
+  if (openCount > 0) return `Open the review panel. ${openCount} open on this page`;
+  return "Open the review panel";
 }
 
 /**

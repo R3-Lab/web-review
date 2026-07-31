@@ -26,6 +26,19 @@ team triages from a side panel, no reviewer account required.
   change or a copy edit; when it can't rebind confidently, the pin still
   renders at its last known position, badged **drifted**, instead of
   disappearing.
+- **Reading feedback and leaving it are separate acts** — the launcher opens
+  the review panel and nothing else; picking a target is armed explicitly,
+  from the panel's own **New comment** button or the `c` shortcut. A reviewer
+  who only wants to read what's already on the page never lands in picking
+  mode, with a crosshair cursor and a capture scrim swallowing every click.
+- **A launcher that moves out of the way** — the Review button drags to any
+  viewport edge and snaps to the nearest one on release (never mid-screen),
+  stays where it was left across reloads, and takes the panel to whichever
+  side keeps the button uncovered. Arrow keys dock it too, so dragging is
+  never the only way to move it (WCAG 2.5.7). The bottom-right corner is
+  contested ground on a real site — chat widgets, cookie banners — and a
+  launcher you can't move is a launcher sitting on the thing you were asked
+  to review.
 - **No reviewer accounts** — a shared-password gate and a browser-minted
   identity stand in for a login; nothing to provision in your users table.
 - **Postgres and MySQL, both** — idempotent SQL files for each dialect, plus
@@ -337,6 +350,35 @@ the overlay's state machine; skip them and you get a form that looks right
 and does nothing — creating a thread, replying, or resolving only happens
 because the render prop was invoked, not because the surface merely rendered.
 
+**Upgrading a custom surface.** Two of those contracts gained required members
+when the launcher stopped arming pin-drop mode (see [Keyboard and
+accessibility](#keyboard-and-accessibility)): `PanelRenderProps` gained
+`pinDropMode`, `onTogglePinDrop`, and `panelSide`; `ComposerRenderProps`
+gained `panelSide`. What that breaks at compile time is narrower than it
+sounds, and the half it *doesn't* break is the dangerous one:
+
+- Code that **constructs** one of these objects — a test harness, a story, a
+  wrapper handing a stock surface hand-built props — stops compiling:
+  `TS2739: … is missing the following properties from type 'PanelRenderProps':
+  panelSide, pinDropMode, onTogglePinDrop`. Add them and it builds again.
+- A `renderPanel`/`renderComposer` **callback** that only destructures the
+  members it uses keeps compiling untouched, because a function taking fewer
+  properties is still assignable where one taking more is expected. So a
+  custom panel written against the old contract type-checks — and then leaves
+  a reviewer with no way to start a comment at all, since the launcher no
+  longer arms pin-drop mode either.
+
+A custom panel therefore needs its own arm/disarm control calling
+`onTogglePinDrop` and reflecting `pinDropMode` (the stock `Panel` renders it
+as one button whose `aria-pressed` carries the state and whose label changes
+word). `panelSide` is `"left"` or `"right"` — which viewport edge the panel is
+docked against right now, following the launcher — so a custom composer can
+keep itself, and its submit button in particular, out from under it. Below
+560px there is no side to avoid: the stock stylesheet turns the panel into a
+full-width bottom sheet, and the stock composer reserves no horizontal space
+for it at all. The prop still carries a value there; it just stops describing
+a layout.
+
 Wrapping a stock surface (rather than replacing it outright) is just as
 supported — import the value from `./surfaces` alongside the type from `.`:
 
@@ -563,6 +605,27 @@ source (`src/core/config.ts`):
 | `enabled` | `undefined` (left to the mount gate) | `config.enabled` — passthrough, not defaulted |
 | `debug` | `false` | `config.debug ?? false` |
 
+### localStorage keys
+
+Three keys hang off `storagePrefix` — the reason it's configurable at all is
+that two consumers on the same origin would otherwise share them. Every read
+degrades to the default below on a missing, malformed, or unreadable value,
+including when `localStorage` throws outright (Safari private mode), so all
+three are safe to delete and safe to ignore:
+
+| Key | Holds | Absent or unreadable |
+|---|---|---|
+| `` `${storagePrefix}.identity` `` | The browser-minted reviewer `{ id, name }` — see [Auth model](#auth-model) | No identity; the composer asks for a name |
+| `` `${storagePrefix}.showHighlights` `` | `"1"`/`"0"`, the panel's **Highlights** checkbox | On |
+| `` `${storagePrefix}.launcher` `` | `{"edge":"left"\|"right"\|"top"\|"bottom","offset":0..1}` — which viewport edge the launcher is docked against, and how far along that edge it sits | Bottom of the right edge |
+
+The launcher's position is an edge plus a fraction rather than a pixel pair on
+purpose: a fraction survives a viewport resize — or the same stored value
+being read on a different machine — without ever putting the button
+off-screen. An `offset` outside `0..1` is clamped rather than rejected, since
+what "1.4" meant is unambiguous and discarding it would move a launcher
+somebody deliberately parked.
+
 ## Auth model
 
 <img src="https://raw.githubusercontent.com/R3-Lab/web-review/main/docs/images/unlock.png" width="378" alt="The shared-password unlock dialog, with the locked Review launcher behind it.">
@@ -788,18 +851,36 @@ chunk-share) is tracked as a follow-up, not fixed here.
 
 ## Keyboard and accessibility
 
-- **`c`** toggles pin-drop mode (ignored while a form field has focus, and
-  ignored with any modifier key held).
+- **`c`** toggles pin-drop mode, and does nothing else — in particular it
+  does not open the panel, the mirror image of the launcher opening the panel
+  without arming pin-drop mode. Ignored while a form field or any
+  `contenteditable` element has focus, while a draft composer is open, and
+  while Ctrl/Cmd/Alt is held; Shift is *not* excluded, so `Shift+C` toggles
+  too.
+- **Arrow keys** dock the launcher against the left, right, top, or bottom
+  edge — while the launcher itself has focus, not globally. This is not a
+  convenience for keyboard users: WCAG 2.5.7 (Dragging Movements) requires a
+  non-drag path to anything a drag can do, so it is part of the launcher's
+  contract rather than a nicety layered on top of it.
 - **Escape** unwinds one layer at a time, in this order: an open unlock
   dialog, then pin-drop mode, then an open draft composer, then the thread
   panel.
+- All three are listed in a strip pinned to the bottom of the panel, present
+  in both its list and detail views and outside the scrolling body, so a long
+  thread list can't push them out of reach. They need that home now: the
+  launcher's accessible name used to advertise `c` and no longer does — it
+  says only what pressing it does (*Open the review panel*, plus the
+  open-thread count when there is one) — and the arrow keys never had one.
 - The composer, thread panel, and unlock dialog each run a **focus trap**
   (`useFocusTrap`) — Tab cycles within the open surface, and focus returns
   to whatever had it before on close (only if that element is still in the
   document). It's a *soft* trap: the keydown listener lives on the
   container, not `document`, so a mouse click elsewhere on the page still
   frees the reviewer — the right shape for a side panel read alongside the
-  host page.
+  host page. The panel deliberately does not pull focus in when it opens,
+  for the same reason: it's a surface a reviewer may only want to glance at,
+  and grabbing focus would move their place on the page (and a screen
+  reader's cursor) to do it.
 - A polite ARIA live region (`role="status" aria-live="polite"`) announces
   pin-drop mode changes, pin drops, saved feedback, replies, and
   resolve/reopen actions.

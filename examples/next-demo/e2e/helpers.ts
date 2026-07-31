@@ -1,25 +1,53 @@
 /**
  * Shared browser-driving helpers for the E2E suite. Every helper drives the
- * REAL overlay DOM exactly the way a reviewer would — keyboard shortcut,
- * real clicks, real form fills — never `page.evaluate`-ing overlay state
- * directly. `page.evaluate` is used only in `helpers.ts`/spec files for
- * reading DOM geometry (bounding rects) or, in the drift spec, for
- * simulating a real page mutation — never to shortcut the overlay's own
- * interaction model.
+ * REAL overlay DOM exactly the way a reviewer would — keyboard shortcuts,
+ * real clicks, real pointer drags, real form fills — never
+ * `page.evaluate`-ing overlay state directly. `page.evaluate` is used only
+ * in `helpers.ts`/spec files for READING (DOM geometry in bounding rects,
+ * the persisted launcher position out of `localStorage`) or, in the drift
+ * spec, for simulating a real page mutation — never to set overlay state, and
+ * never to shortcut the overlay's own interaction model.
  */
 
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { REVIEW_PASSWORD } from "./constants";
 
-/** The locked launcher toggle — see `overlay-root.tsx`'s locked-gate render branch. */
+/**
+ * The locked launcher toggle — see `overlay-root.tsx`'s locked-gate render
+ * branch. `data-locked="true"` is written for the `checking` gate state as
+ * well as `locked` (see `launcher.tsx`'s comment on the attribute): it
+ * answers "is this the gate's button?", not "did the access probe finish?".
+ */
 export function lockedToggle(page: Page): Locator {
   return page.locator(".r3wr-toggle[data-locked='true']");
 }
 
-/** The unlocked launcher toggle (the "Review"/pin-drop button) — absent while locked. */
+/**
+ * The unlocked launcher toggle — the "Review" button, which opens and closes
+ * the panel and does nothing else. Absent while locked AND while still
+ * checking, since `data-locked` covers both of those states; this selector
+ * therefore means "the working launcher", not merely "not locked".
+ */
 export function unlockedToggle(page: Page): Locator {
   return page.locator(".r3wr-toggle:not([data-locked])");
+}
+
+/** The panel's own "add a comment" control — list view only, `aria-pressed` carries whether pin-drop mode is armed. */
+export function newCommentButton(page: Page): Locator {
+  return page.locator("button.r3wr-new-comment");
+}
+
+/**
+ * Opens the review panel the way a reviewer does — by pressing the launcher.
+ * Toggles, so this must be called from a closed-panel state. Nothing else
+ * opens the panel any more: `c` arms pin-drop mode without opening it.
+ */
+export async function openPanel(page: Page): Promise<Locator> {
+  await unlockedToggle(page).click();
+  const panel = page.locator(".r3wr-panel");
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 /**
@@ -81,31 +109,24 @@ export async function fillAndSubmitComposer(page: Page, fields: ComposerFields):
 
 /**
  * Scrolls so `locator`'s vertical CENTER (i.e. where a centered click
- * lands) sits ~60px below the viewport top — maximum headroom for the
- * composer below the click point, regardless of the target's own height.
+ * lands) sits ~60px below the viewport top, making every drop in this suite
+ * use the same click point relative to the viewport — and leaving the whole
+ * composer, which opens 16px below that point, comfortably on screen.
  *
- * Working around a real bug found while writing this suite: the composer
- * (`composer.tsx`) positions itself with
- * `top = Math.max(8, Math.min(vy + 16, window.innerHeight - 160))` — that
- * clamp only guarantees ~160px of headroom below the click point, but the
- * composer's actual content (category picker + title + comment + name +
- * screenshot note + the submit/cancel buttons) is routinely ~450-500px
- * tall. A pin dropped anywhere in roughly the lower two-thirds of the
- * viewport renders a composer whose "Add feedback" button is BELOW the
- * viewport's bottom edge — and unreachable by scrolling, since the
- * composer is `position: fixed` (page scroll does nothing to it) and its
- * own `overflow-y: auto` only helps when CONTENT exceeds the box, not when
- * the box itself is positioned partly off-screen. A real reviewer clicking
- * near the bottom of their window would hit the exact same dead end. See
- * the task write-up for a screenshot. Filed as a package bug, not fixed
- * here (out of this suite's scope) — this helper keeps every drop's click
- * point near the top of the viewport so the suite isn't blocked by it.
+ * This began as a workaround for two real clamp bugs in `composer.tsx`, both
+ * since fixed in the package — the comment is kept accurate rather than
+ * deleted, because the numbers are what make the fixes checkable:
  *
- * The companion horizontal half of this problem (the composer can also
- * render partially BEHIND the always-open `.r3wr-panel`, a fixed 384px
- * dock on the right) is worked around at the project level instead —
- * see `playwright.config.ts`'s `viewport` — since it depends on the
- * demo's own `860px` content max-width, not on any one element's position.
+ *  - Vertically it clamped `top` against a flat `window.innerHeight - 160`,
+ *    guaranteeing ~160px of headroom for a composer routinely ~450-550px
+ *    tall, so a pin dropped low in the viewport put "Add feedback" below the
+ *    fold and out of reach (the composer is `position: fixed`, so page
+ *    scrolling does nothing to it). It now clamps against the composer's own
+ *    measured height — `maxTop = innerHeight - composerHeight - 8`.
+ *  - Horizontally it didn't know `.r3wr-panel` existed, so a composer opened
+ *    while the panel was showing could render behind it. It now reserves the
+ *    panel's real width on the side the panel is actually docked to
+ *    (`panelSide`), which `launcher-panel.spec.ts` asserts directly.
  */
 async function positionNearViewportTop(locator: Locator): Promise<void> {
   await locator.evaluate((el) => {
@@ -116,9 +137,14 @@ async function positionNearViewportTop(locator: Locator): Promise<void> {
 }
 
 /**
- * Presses "c" to enter pin-drop mode, clicks `locator` (dead-center, so the
- * captured `offsetPct` lands very close to `{x:0.5, y:0.5}` — scenario 4's
- * position check relies on this), fills the composer, and submits.
+ * Presses "c" to enter pin-drop mode — which no longer also opens the panel,
+ * so this drops a pin with the panel shut — clicks `locator` (dead-center,
+ * so the captured `offsetPct` lands very close to `{x:0.5, y:0.5}`; scenario
+ * 4's position check relies on this), fills the composer, and submits.
+ *
+ * The other way in, the panel's own "New comment" button, is driven directly
+ * by `launcher-panel.spec.ts` rather than through a helper, because the
+ * states that control passes through are the thing that spec is asserting.
  */
 export async function dropElementPin(page: Page, locator: Locator, fields: ComposerFields): Promise<void> {
   await positionNearViewportTop(locator);

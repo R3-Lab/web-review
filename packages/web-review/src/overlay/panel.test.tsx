@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
@@ -88,6 +88,7 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
   const onFilterChange = vi.fn();
   const onSelect = vi.fn();
   const onToggleHighlights = vi.fn();
+  const onTogglePinDrop = vi.fn();
   const onClose = vi.fn();
   const onBack = vi.fn();
   const onReply = vi.fn(() => Promise.resolve());
@@ -102,8 +103,13 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
     selected: null,
     selectedResolved: undefined,
     identity: { id: "u1", name: "Ada" },
+    // "right" is what `panelSideForEdge` returns for the launcher's default
+    // edge, so the fixture describes the default configuration.
+    panelSide: "right",
     showHighlights: true,
     onToggleHighlights,
+    pinDropMode: false,
+    onTogglePinDrop,
     onClose,
     onSelect,
     onBack,
@@ -118,6 +124,7 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
     onFilterChange,
     onSelect,
     onToggleHighlights,
+    onTogglePinDrop,
     onClose,
     onBack,
     onReply,
@@ -207,5 +214,104 @@ describe("Panel", () => {
     expect(screen.getByRole("heading", { name: /^thread$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /all feedback/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^resolved$/i })).not.toBeInTheDocument();
+  });
+
+  it("docks to the side it is told to, for both sides", () => {
+    renderPanel({ panelSide: "right" });
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-side", "right");
+    cleanup();
+
+    renderPanel({ panelSide: "left" });
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-side", "left");
+  });
+});
+
+// The launcher opens the panel and nothing else (WP2), so the explicit
+// "arm picking" action lives here — and it is the ONLY primary action on this
+// surface.
+describe("Panel — the New comment control", () => {
+  it("renders in the list view and calls onTogglePinDrop exactly once per click", async () => {
+    const user = userEvent.setup();
+    const { onTogglePinDrop } = renderPanel();
+    await user.click(screen.getByRole("button", { name: /new comment/i }));
+    expect(onTogglePinDrop).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries aria-pressed matching pinDropMode", () => {
+    renderPanel({ pinDropMode: false });
+    expect(screen.getByRole("button", { name: /new comment/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    cleanup();
+
+    renderPanel({ pinDropMode: true });
+    expect(screen.getByRole("button", { name: /cancel adding a comment/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("offers the shortcut hint when idle and the cancel affordance (without it) when armed", () => {
+    const { unmount } = renderPanel({ pinDropMode: false });
+    const idle = screen.getByRole("button", { name: /new comment/i });
+    expect(idle).toHaveTextContent("New comment");
+    // The `c` shortcut is advertised here precisely because the launcher's
+    // own label stopped advertising it.
+    expect(idle.querySelector("kbd")).toHaveTextContent("C");
+    unmount();
+
+    renderPanel({ pinDropMode: true });
+    const armed = screen.getByRole("button", { name: /cancel adding a comment/i });
+    expect(armed).toHaveTextContent("Cancel");
+    expect(armed).not.toHaveTextContent("New comment");
+    // No hint while armed: the on-page capture hint already says what to
+    // click and that Escape cancels.
+    expect(armed.querySelector("kbd")).toBeNull();
+  });
+
+  it("is absent in the detail view, where the back button is the primary action", () => {
+    const thread = makeThread({ title: "Selected thread" });
+    renderPanel({ threads: [thread], selected: thread });
+    expect(screen.queryByRole("button", { name: /new comment/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /cancel adding a comment/i })).not.toBeInTheDocument();
+  });
+});
+
+// The strip documents the OVERLAY, not the list, so it is present on both
+// views — and every entry names a binding that really exists (`c` and Escape
+// in `OverlayRoot`'s keydown handler, the arrow keys in `Launcher`'s).
+describe("Panel — the keyboard shortcuts footer", () => {
+  function expectShortcuts() {
+    const list = screen.getByRole("list", { name: /keyboard shortcuts/i });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(items[0]!).toHaveTextContent(/^C\s*New pin$/);
+    expect(items[1]!).toHaveTextContent(/^Esc\s*Close \/ cancel$/);
+    // The arrows are the WCAG 2.5.7 alternative to dragging the launcher and
+    // only work while it has focus — the label must not imply they are global.
+    expect(items[2]!).toHaveTextContent(/while it has focus/i);
+    expect(within(items[2]!).getAllByText(/^[←↑↓→]$/)).toHaveLength(4);
+  }
+
+  it("renders in the list view, named, with all three shortcuts", () => {
+    renderPanel();
+    expectShortcuts();
+  });
+
+  it("renders in the detail view too", () => {
+    const thread = makeThread({ title: "Selected thread" });
+    renderPanel({ threads: [thread], selected: thread });
+    expectShortcuts();
+  });
+
+  it("sits outside the scrolling panel body, so a long list cannot scroll it away", () => {
+    renderPanel({ threads: [makeThread(), makeThread(), makeThread()] });
+    const footer = screen.getByRole("list", { name: /keyboard shortcuts/i }).closest("footer");
+    if (!footer) throw new Error("expected the shortcuts list's <footer> ancestor");
+    expect(footer.closest(".r3wr-panel-body")).toBeNull();
+    expect(footer.parentElement).toHaveClass("r3wr-panel");
+    // Last child, i.e. after `.r3wr-panel-body` — the strip is pinned below it.
+    expect(footer.previousElementSibling).toHaveClass("r3wr-panel-body");
   });
 });

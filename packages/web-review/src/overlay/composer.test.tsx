@@ -81,9 +81,13 @@ function renderComposer(
     config,
     identity: null,
     shotState: "idle",
-    // `true` by default: this is the composer's normal condition — see
-    // `panelOpen`'s doc comment on `ComposerRenderProps`.
+    // The panel is an axis of its own now, so neither value is "normal" —
+    // see `panelOpen`'s doc comment on `ComposerRenderProps`. `true` is the
+    // one that exercises the composer's clamp, hence the default here.
     panelOpen: true,
+    // "right" is what `panelSideForEdge` returns for the launcher's default
+    // edge, so the fixture describes the default configuration.
+    panelSide: "right",
     onCancel,
     onSubmit,
     onUnlocked,
@@ -302,5 +306,61 @@ describe("position clamping at a normal 1280px viewport (WP21)", () => {
     // below the bottom of an 800px viewport, with no way to scroll to it.
     expect(top + REALISTIC_HEIGHT).toBeLessThanOrEqual(800);
     expect(screen.getByRole("button", { name: /add feedback/i })).toBeInTheDocument();
+  });
+
+  // The panel follows the launcher, so it can sit on either side. The
+  // reservation has to move to the bound that matches, and the fixture's
+  // `panelOpen: true` default is deliberate — the shut cases are stated
+  // explicitly below rather than assumed.
+  const COMPOSER_W = 336; // min(336, 1280 - 16)
+  const PANEL_W = 384; // .r3wr-panel's docked width: min(384, 0.94 * 1280)
+
+  /** The clamped viewport `left` the composer settled on for `anchor.rect.x`. */
+  function leftFor(
+    panelOpen: boolean,
+    panelSide: ComposerRenderProps["panelSide"],
+    pinX: number,
+  ): number {
+    stubViewport(1280, 800);
+    stubComposerBox(COMPOSER_W, 300);
+    renderComposer({
+      anchor: makeAnchor({ rect: { x: pinX, y: 100, w: 100, h: 40 }, offsetPct: { x: 0.5, y: 0.5 } }),
+      panelOpen,
+      panelSide,
+    });
+    return parseFloat(screen.getByRole("dialog").style.left);
+  }
+
+  it("reserves the RIGHT edge for a right-docked panel", () => {
+    // A pin far right, which without the reservation would put the composer
+    // under a right-docked panel.
+    const left = leftFor(true, "right", 1000);
+    expect(left + COMPOSER_W).toBeLessThanOrEqual(1280 - PANEL_W);
+  });
+
+  it("reserves the LEFT edge for a left-docked panel, pushing the composer clear of it", () => {
+    // A pin far left. A right-edge reservation would do nothing here — the
+    // composer would sit at the 8px margin, squarely under a left-docked
+    // panel — so this is the case that catches the reservation being applied
+    // to the wrong bound.
+    const left = leftFor(true, "left", 20);
+    expect(left).toBeGreaterThanOrEqual(PANEL_W);
+    // …and pushing it clear must not push it off the other edge.
+    expect(left + COMPOSER_W).toBeLessThanOrEqual(1280);
+  });
+
+  it("applies neither reservation when the panel is shut", () => {
+    // Shut, far-left pin: free to sit beside the pin at the 8px margin,
+    // where a left-docked OPEN panel would have pushed it to 384px.
+    const shutLeft = leftFor(false, "left", 20);
+    expect(shutLeft).toBeLessThan(PANEL_W);
+    cleanup();
+
+    // Shut, far-right pin: free to run past where an open right-docked panel
+    // would have stopped it (1280 - 384 = 896).
+    const shutRight = leftFor(false, "right", 1000);
+    expect(shutRight + COMPOSER_W).toBeGreaterThan(1280 - PANEL_W);
+    // Still fully on-screen, of course.
+    expect(shutRight + COMPOSER_W).toBeLessThanOrEqual(1280 - 8);
   });
 });

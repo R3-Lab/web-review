@@ -28,10 +28,14 @@
  *     so pins and highlights land exactly where the real overlay would put
  *     them.
  *
- * Crops are computed from live `boundingBox()`/`scrollHeight` reads, not
+ * Crops are computed from live `boundingBox()`/`getComputedStyle` reads, not
  * hard-coded pixel guesses, so a future copy/layout tweak in the demo page
  * or the package's own components re-crops correctly rather than silently
- * cutting something off.
+ * cutting something off. The two shots that show the whole side panel size
+ * the VIEWPORT from those same reads instead of cutting a window out of a
+ * tall one: the panel is exactly as tall as the viewport and its shortcuts
+ * strip is pinned to the panel's bottom edge, so no crop shorter than the
+ * full viewport height can contain it (see `resizeViewport`).
  */
 
 import { chromium } from "@playwright/test";
@@ -162,6 +166,67 @@ async function unlock(page, password = REVIEW_PASSWORD) {
   await unlockedToggle(page).waitFor({ state: "visible" });
 }
 
+/**
+ * Opens the review panel on its thread LIST the way a reviewer does — by
+ * pressing the launcher — and returns that list dialog.
+ *
+ * This used to press "c" and then Escape, which worked back when arming
+ * pin-drop mode also opened the panel: Escape unwound the picking and left
+ * the panel behind, open on the list. Neither half of that is true any more
+ * (`overlay-root.tsx`: the launcher opens the panel and does not arm picking;
+ * `c` arms picking and does not open the panel), so that sequence now leaves
+ * the panel shut and every wait after it times out. Pressing the launcher is
+ * the only thing that opens the panel now — which is also what
+ * `examples/next-demo/e2e/helpers.ts`'s `openPanel` does.
+ *
+ * The launcher TOGGLES, so this must be called with the panel closed. Every
+ * caller here runs in a freshly created context whose first and only panel
+ * gesture is this one, which is also what makes the returned locator safe to
+ * name: closing the panel does NOT clear the selected thread, so a re-opened
+ * panel can land on the detail view instead — and then this locator's
+ * accessible name ("Feedback on this page" vs "Thread") would not match, and
+ * the wait would fail loudly rather than capture the wrong surface.
+ */
+async function openPanelList(page) {
+  await unlockedToggle(page).click();
+  const list = page.getByRole("dialog", { name: "Feedback on this page" });
+  await list.waitFor({ state: "visible" });
+  return list;
+}
+
+/**
+ * Resizes the viewport to `height` (the width never changes) and waits for
+ * the overlay to catch up.
+ *
+ * `.r3wr-panel` is `position: fixed; top: 0; bottom: 0` — always exactly as
+ * tall as the viewport — and its `.r3wr-shortcuts` strip is pinned to its
+ * bottom edge, outside the scrolling body. So the strip always sits at the
+ * very bottom of the VIEWPORT, not below the last thread: no crop that stops
+ * short of the full viewport height can contain it, however it is computed.
+ * The two shots that show the whole panel therefore size the viewport to the
+ * height they want and then capture all of it, instead of cutting a window
+ * out of a 2000px-tall one. The height is still measured, never guessed —
+ * see each caller.
+ *
+ * The wait is on the LAUNCHER rather than the panel because the launcher is
+ * the last thing to settle: the panel's new height is pure CSS and lands with
+ * the resize, but the launcher's position along its edge is computed in JS
+ * from the viewport size (`offsetToPx`, re-run by the component's own
+ * `resize` listener). Until that runs it is still docked against the OLD
+ * viewport height and hangs off the bottom of the new one — which is exactly
+ * what this condition rejects. It reads as "docked near the bottom edge and
+ * fully inside the viewport", true only for the settled state at the
+ * launcher's default position (the bottom of the right edge), which is where
+ * every caller leaves it.
+ */
+async function resizeViewport(page, height) {
+  await page.setViewportSize({ width: VIEWPORT.width, height });
+  await page.waitForFunction((h) => {
+    const rect = document.querySelector(".r3wr-toggle")?.getBoundingClientRect();
+    return !!rect && rect.bottom <= h && rect.bottom > h - 80;
+  }, height);
+}
+
 async function fillComposer(page, fields) {
   const composer = page.locator(".r3wr-composer");
   await composer.waitFor({ state: "visible" });
@@ -271,14 +336,12 @@ async function seed(browser) {
     await page.goto(BASE_URL);
     await disableAnimations(page);
     await unlock(page);
-    // Open the list (not the just-created thread) the same way
-    // reply-resolve.spec.ts does: enter pin-drop mode, then Escape out of
-    // it — that leaves the panel open on the thread LIST, genuinely
-    // exercising "find it from the list" rather than any auto-open.
-    await page.keyboard.press("c");
-    await page.keyboard.press("Escape");
-    const list = page.getByRole("dialog", { name: "Feedback on this page" });
-    await list.waitFor({ state: "visible" });
+    // A fresh context, so this reviewer arrives at the page with nothing
+    // selected and no panel open — exactly like reply-resolve.spec.ts after
+    // its own close/re-open, and the same point: Mateo finds Thread B in the
+    // list rather than being handed it by the auto-open that follows
+    // creating one.
+    const list = await openPanelList(page);
     await list.locator(".r3wr-thread", { hasText: THREAD_B.title }).click();
 
     const detail = page.getByRole("dialog", { name: "Thread" });
@@ -386,12 +449,7 @@ async function captureHero(browser) {
   await page.goto(BASE_URL);
   await disableAnimations(page);
   await unlock(page);
-  // List, not composing — same "c then Escape" pattern as the reply/resolve
-  // seed step above.
-  await page.keyboard.press("c");
-  await page.keyboard.press("Escape");
-  const list = page.getByRole("dialog", { name: "Feedback on this page" });
-  await list.waitFor({ state: "visible" });
+  const list = await openPanelList(page);
   // Default filter is "open" (see overlay-root.tsx) — Thread B is resolved,
   // so switch to "All" to show every thread, open and resolved alike.
   await list.getByRole("button", { name: "All", exact: true }).click();
@@ -406,19 +464,36 @@ async function captureHero(browser) {
   // height, leaving a large dead strip of empty panel below the list; a 4th
   // thread plus taking the max of both bounds keeps the list looking used
   // rather than sparse, without over- or under-cropping either side.
-  const mainBox = await page.locator("main").boundingBox();
+  //
+  // That height is then given to the VIEWPORT rather than to a clip out of a
+  // 2000px-tall one (see `resizeViewport`), because the panel is as tall as
+  // the viewport and its "New comment" bar and pinned shortcuts strip are the
+  // top and bottom of it: cropping the middle out showed neither the strip
+  // nor the launcher, and left the panel looking like it simply stopped.
+  // The two boxes that decide the height have to be read BEFORE it is
+  // applied, which is sound because this page's layout is driven entirely by
+  // its width: it has no viewport-height units, so shrinking the viewport
+  // moves neither of them.
   const testimonialBox = await page.getByTestId("testimonial").boundingBox();
   const lastThreadBox = await list.locator(".r3wr-thread").last().boundingBox();
-  const left = Math.max(0, mainBox.x - 40);
   const pageContentBottom = testimonialBox.y + testimonialBox.height;
   const panelContentBottom = lastThreadBox.y + lastThreadBox.height;
-  const clip = {
-    x: left,
-    y: 0,
-    width: VIEWPORT.width - left,
-    height: Math.min(VIEWPORT.height, Math.max(pageContentBottom, panelContentBottom) + 40),
-  };
-  await capture("hero", clip, page);
+  const height = Math.min(
+    VIEWPORT.height,
+    Math.ceil(Math.max(pageContentBottom, panelContentBottom) + 40),
+  );
+  await resizeViewport(page, height);
+
+  // The left bound, by contrast, is read AFTER the resize, so the crop is
+  // bound to the layout actually being captured. It measures the same either
+  // side of it today — this browser's scrollbar is an overlay and takes no
+  // layout width, so the centred column does not shift when the page becomes
+  // scrollable — but that is a property of the browser, not of the crop, and
+  // a stale reading would silently mis-frame the shot the day it stops
+  // holding.
+  const mainBox = await page.locator("main").boundingBox();
+  const left = Math.max(0, mainBox.x - 40);
+  await capture("hero", { x: left, y: 0, width: VIEWPORT.width - left, height }, page);
   await ctx.close();
 }
 
@@ -501,10 +576,7 @@ async function captureThreadDetail(browser) {
   await page.goto(BASE_URL);
   await disableAnimations(page);
   await unlock(page);
-  await page.keyboard.press("c");
-  await page.keyboard.press("Escape");
-  const list = page.getByRole("dialog", { name: "Feedback on this page" });
-  await list.waitFor({ state: "visible" });
+  const list = await openPanelList(page);
   // Thread B is resolved — same "All" filter switch as captureHero.
   await list.getByRole("button", { name: "All", exact: true }).click();
   await list.locator(".r3wr-thread", { hasText: THREAD_B.title }).click();
@@ -513,15 +585,36 @@ async function captureThreadDetail(browser) {
   await detail.getByText(THREAD_B.reply.body).waitFor({ state: "visible" }); // reply rendered
 
   // `.r3wr-panel-body` is a `flex: 1` child of the fixed-full-height panel,
-  // so its OWN boundingBox/scrollHeight is stretched to fill the leftover
-  // viewport space regardless of how little content it holds — measuring
-  // that gave a crop reaching almost the full 2000px viewport height, mostly
-  // blank. The reply/resolve actions row is the last real content, so its
-  // bottom edge is the true content boundary.
-  const panelBox = await page.locator(".r3wr-panel").boundingBox();
+  // so its OWN boundingBox is stretched to fill the leftover viewport space
+  // regardless of how little content it holds (and its `scrollHeight` reports
+  // that stretched box, not the content, whenever the content is the shorter
+  // of the two) — measuring either gave a crop reaching almost the full
+  // 2000px viewport height, mostly blank. The reply/resolve actions row is
+  // the last real content, so its bottom edge plus the body's own bottom
+  // padding is the true content boundary.
+  //
+  // That boundary sizes the VIEWPORT here rather than a clip (see
+  // `resizeViewport`): the shortcuts strip is pinned to the panel's bottom
+  // edge, so it is only in frame when the frame IS the viewport. The strip's
+  // own height is part of the sum for the same reason — leave it out and the
+  // body loses exactly that many pixels and starts scrolling.
   const actionsBox = await page.locator(".r3wr-actions").boundingBox();
-  const contentHeight = Math.min(VIEWPORT.height, actionsBox.y + actionsBox.height + 24);
-  await capture("thread-detail", { x: panelBox.x, y: 0, width: panelBox.width, height: contentHeight }, page);
+  const shortcutsBox = await page.locator(".r3wr-shortcuts").boundingBox();
+  const bodyPadBottom = await page
+    .locator(".r3wr-panel-body")
+    .evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingBottom));
+  const height = Math.min(
+    VIEWPORT.height,
+    // The 2px is slack against sub-pixel box heights, not a design choice: a
+    // viewport half a pixel short of the content leaves the panel body
+    // overflowing by that half pixel and puts a scrollbar down the middle of
+    // the shot.
+    Math.ceil(actionsBox.y + actionsBox.height + bodyPadBottom + shortcutsBox.height) + 2,
+  );
+  await resizeViewport(page, height);
+
+  const panelBox = await page.locator(".r3wr-panel").boundingBox();
+  await capture("thread-detail", { x: panelBox.x, y: 0, width: panelBox.width, height }, page);
   await ctx.close();
 }
 

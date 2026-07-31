@@ -23,8 +23,10 @@ import { isLocked } from "../core/adapter";
 import type { Anchor, AnchorKind, ReviewCategoryDef } from "../core/types";
 import { useFocusTrap } from "../client/use-focus-trap";
 import type { ComposerRenderProps } from "./overlay-root";
+import type { PanelSide } from "./launcher-position";
 import { CategoryIcon, CircleAlertIcon, XIcon } from "./icons";
 import { categoryAccent, resolveCategory } from "./helpers";
+import { panelDockWidth } from "./panel-geometry";
 import { PasswordForm } from "./unlock-dialog";
 
 const TAG = { [OVERLAY_ATTR]: "" } as const;
@@ -50,24 +52,6 @@ function defaultCategoryId(categories: ReviewCategoryDef[], kind: AnchorKind | u
 // guessing either.
 
 /**
- * `.r3wr-panel`'s own geometry (`overlay.css`), mirrored here so the
- * composer's submit button never lands underneath it. Below
- * `PANEL_NARROW_BREAKPOINT_PX` the panel stops being a right-docked sidebar
- * and becomes a bottom sheet instead (`overlay.css`'s
- * `@media (max-width: 560px)`), so it no longer competes for horizontal
- * space at all — the reservation below is 0 past that point.
- */
-const PANEL_WIDTH_PX = 384;
-const PANEL_MAX_WIDTH_VW = 0.94;
-const PANEL_NARROW_BREAKPOINT_PX = 560;
-
-/** How much horizontal space `.r3wr-panel` actually reserves along the right edge right now, or 0 when it isn't docked there. */
-function panelReservedWidth(panelOpen: boolean, innerWidth: number): number {
-  if (!panelOpen || innerWidth <= PANEL_NARROW_BREAKPOINT_PX) return 0;
-  return Math.min(PANEL_WIDTH_PX, innerWidth * PANEL_MAX_WIDTH_VW);
-}
-
-/**
  * First-paint fallback for the composer's own rendered height, used only
  * until the `useLayoutEffect` below measures the real thing — which it does
  * before the browser paints, so this value is never actually visible to a
@@ -78,10 +62,21 @@ function panelReservedWidth(panelOpen: boolean, innerWidth: number): number {
  */
 const COMPOSER_HEIGHT_FALLBACK_PX = 500;
 
-/** Viewport-coordinate position for the composer, clamped so the WHOLE box — not just its top-left corner — stays inside the visible viewport and clear of the panel. */
+/**
+ * Viewport-coordinate position for the composer, clamped so the WHOLE box —
+ * not just its top-left corner — stays inside the visible viewport and clear
+ * of the panel.
+ *
+ * The panel docks to whichever side keeps it off the launcher, so `panelSide`
+ * decides WHICH horizontal bound its reservation moves: a right-docked panel
+ * lowers the maximum left, a left-docked one raises the minimum instead.
+ * Getting that backwards wouldn't merely fail to help — it would push the
+ * composer straight under the panel it is supposed to avoid.
+ */
 function clampComposerPosition(
   anchor: Anchor,
   panelOpen: boolean,
+  panelSide: PanelSide,
   composerHeight: number,
 ): { left: number; top: number } {
   // Mirrors `.r3wr-composer`'s own `width: min(336px, calc(100vw - 16px))`
@@ -90,14 +85,28 @@ function clampComposerPosition(
   const vx = anchor.rect.x + anchor.offsetPct.x * anchor.rect.w - window.scrollX;
   const vy = anchor.rect.y + anchor.offsetPct.y * anchor.rect.h - window.scrollY;
 
-  const reservedRight = panelReservedWidth(panelOpen, window.innerWidth);
-  // `Math.max(8, ...)` on each bound: if the panel and the composer's own
-  // minimum width genuinely cannot both fit (an extremely narrow desktop
-  // window), best-effort clamp to the 8px margin rather than let the min()
-  // below pick a negative bound and push the composer off the left edge —
-  // a little overlap with the panel is a smaller failure than that.
+  // How wide the panel's column is right now, or 0 when it isn't a column:
+  // shut, or below the narrow breakpoint where it is a bottom sheet and stops
+  // competing for horizontal space. `./panel-geometry` owns those numbers,
+  // and `./launcher-position` clamps the launcher against the same ones.
+  const reserved = panelOpen ? panelDockWidth(window.innerWidth) : 0;
+  const reservedRight = panelSide === "right" ? reserved : 0;
+  const reservedLeft = panelSide === "left" ? reserved : 0;
+
+  // `Math.max(8, ...)`: if the panel and the composer's own minimum width
+  // genuinely cannot both fit (an extremely narrow desktop window),
+  // best-effort clamp to the 8px margin rather than let a bound go negative
+  // and push the composer off the left edge — a little overlap with the
+  // panel is a smaller failure than a composer nobody can reach.
   const maxLeft = Math.max(8, window.innerWidth - width - 8 - reservedRight);
-  const left = Math.max(8, Math.min(vx + 16, maxLeft));
+  // The same posture pointed the other way, and the reason the bounds can
+  // never invert: the left reservation is only honoured as far as `maxLeft`
+  // allows, so a viewport too narrow to satisfy both gives up the clearance
+  // rather than shoving the composer off the RIGHT edge. (Only one of the
+  // two reservations is ever non-zero — the panel is on one side or the
+  // other — so this never has to arbitrate between two real constraints.)
+  const minLeft = Math.max(8, Math.min(8 + reservedLeft, maxLeft));
+  const left = Math.max(minLeft, Math.min(vx + 16, maxLeft));
 
   const maxTop = Math.max(8, window.innerHeight - composerHeight - 8);
   const top = Math.max(8, Math.min(vy + 16, maxTop));
@@ -109,10 +118,11 @@ function clampComposerPosition(
 function measureAndClamp(
   anchor: Anchor,
   panelOpen: boolean,
+  panelSide: PanelSide,
   el: HTMLDivElement | null,
 ): { left: number; top: number } {
   const composerHeight = el?.getBoundingClientRect().height || COMPOSER_HEIGHT_FALLBACK_PX;
-  return clampComposerPosition(anchor, panelOpen, composerHeight);
+  return clampComposerPosition(anchor, panelOpen, panelSide, composerHeight);
 }
 
 export function Composer({
@@ -121,6 +131,7 @@ export function Composer({
   identity,
   shotState,
   panelOpen,
+  panelSide,
   onCancel,
   onSubmit,
   onUnlocked,
@@ -148,7 +159,7 @@ export function Composer({
   // `clampComposerPosition` above. Seeded with a fallback height for the
   // very first paint; the layout effect below corrects it to the real
   // measured height before that paint happens.
-  const [pos, setPos] = useState(() => measureAndClamp(anchor, panelOpen, null));
+  const [pos, setPos] = useState(() => measureAndClamp(anchor, panelOpen, panelSide, null));
 
   // Re-clamp to the composer's REAL rendered height, which varies with its
   // content (the name field, an error message, the inline password-recovery
@@ -158,7 +169,7 @@ export function Composer({
   // guard is what keeps that from looping once `pos` already matches.
   useLayoutEffect(() => {
     setPos((prev) => {
-      const next = measureAndClamp(anchor, panelOpen, ref.current);
+      const next = measureAndClamp(anchor, panelOpen, panelSide, ref.current);
       return prev.left === next.left && prev.top === next.top ? prev : next;
     });
   });
@@ -169,10 +180,10 @@ export function Composer({
   // own, so this needs its own listener rather than relying on the layout
   // effect above.
   useEffect(() => {
-    const onResize = () => setPos(measureAndClamp(anchor, panelOpen, ref.current));
+    const onResize = () => setPos(measureAndClamp(anchor, panelOpen, panelSide, ref.current));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [anchor, panelOpen, ref]);
+  }, [anchor, panelOpen, panelSide, ref]);
 
   const doSubmit = async (): Promise<boolean> => {
     setBusy(true);

@@ -214,21 +214,27 @@ function renderFullOverlay(config: ReviewConfig) {
   );
 }
 
+/** A host-page element to pin, with the geometry stubs the click path needs. */
+function mountTarget() {
+  const target = document.createElement("div");
+  target.setAttribute("data-testid", "widget");
+  target.textContent = "A page element under review";
+  document.body.appendChild(target);
+  stubRect(target, { x: 0, y: 0, w: 200, h: 60 });
+  vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+  return target;
+}
+
 describe("panel-surface integration: pin drop → composer → panel → reply → resolve", () => {
   it("carries a new thread from pin-drop through the composer, the panel list, detail, a reply, and a resolve", async () => {
-    const target = document.createElement("div");
-    target.setAttribute("data-testid", "widget");
-    target.textContent = "A page element under review";
-    document.body.appendChild(target);
-    stubRect(target, { x: 0, y: 0, w: 200, h: 60 });
-    vi.spyOn(document, "elementFromPoint").mockReturnValue(target);
+    const target = mountTarget();
 
     const adapter = makeAdapter([]);
     const user = userEvent.setup();
     renderFullOverlay({ adapter });
 
     // ── drop a pin, entering the composer ──────────────────────────────────
-    await screen.findByRole("button", { name: /drop a review pin/i });
+    await screen.findByRole("button", { name: /review panel/i });
     await user.keyboard("c");
     await user.click(target);
 
@@ -282,5 +288,48 @@ describe("panel-surface integration: pin drop → composer → panel → reply �
       expect(adapter.setStatus).toHaveBeenCalledWith(expect.any(String), "resolved", "Ada Reviewer"),
     );
     await screen.findByRole("button", { name: /reopen/i });
+  });
+});
+
+/**
+ * The decoupling, end to end through the real components rather than the seam
+ * alone: the launcher used to do both jobs, and a reviewer who only wanted to
+ * READ the feedback on a page was put into picking mode as a side effect —
+ * crosshair cursor, capture scrim, every click on the host page swallowed.
+ * These two intentions are now expressed separately, and the panel's own
+ * control is the visible half of that split.
+ */
+describe("panel-surface integration: the launcher opens the panel, the panel arms picking", () => {
+  it("opens the panel without arming pin-drop mode, then arms it from the panel's own New comment control", async () => {
+    const target = mountTarget();
+    const user = userEvent.setup();
+    renderFullOverlay({ adapter: makeAdapter([]) });
+
+    // ── the launcher opens the panel, and does nothing else ────────────────
+    await user.click(await screen.findByRole("button", { name: /open the review panel/i }));
+    const panel = await screen.findByRole("dialog");
+    expect(panel).toHaveClass("r3wr-panel");
+
+    // Picking is NOT armed: no capture hint over the page…
+    expect(screen.queryByText(/select words to pin the copy/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /new comment/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    // …and a click on the host page is still the host page's own click, not
+    // a pin drop, so no composer appears.
+    await user.click(target);
+    expect(screen.queryByLabelText(/^comment$/i)).not.toBeInTheDocument();
+
+    // ── the panel's own control is what arms it ────────────────────────────
+    await user.click(screen.getByRole("button", { name: /new comment/i }));
+    expect(await screen.findByText(/select words to pin the copy/i)).toBeInTheDocument();
+    const armed = screen.getByRole("button", { name: /cancel adding a comment/i });
+    expect(armed).toHaveAttribute("aria-pressed", "true");
+    expect(armed).toHaveTextContent("Cancel");
+
+    // ── and now the same click really does drop a pin ──────────────────────
+    await user.click(target);
+    expect(await screen.findByLabelText(/^comment$/i)).toBeInTheDocument();
   });
 });
