@@ -75,6 +75,40 @@ describe("newThreadSchema", () => {
   it("accepts a null locale (unlocalized consumer sites)", () => {
     const result = newThreadSchema.safeParse({ ...validThreadPayload, locale: null });
     expect(result.success).toBe(true);
+    if (result.success) expect(result.data.locale).toBeNull();
+  });
+
+  // Regression: `locale` was `.nullable()` while `route`, `title` and
+  // `screenshotKey` beside it were `.nullish()`, so `locale` was the one
+  // optional field that had to be spelled out as an explicit `null` —
+  // omitting it 400'd. See the field's doc comment in ./validation.
+  it("accepts an omitted locale, the same as an explicit null", () => {
+    const withoutLocale: Record<string, unknown> = { ...validThreadPayload };
+    delete withoutLocale["locale"];
+    const result = newThreadSchema.safeParse(withoutLocale);
+    expect(result.success).toBe(true);
+    // `undefined` at this layer by design — `POST /threads` normalizes it to
+    // `null` before it reaches a store (see routes.test.ts's round-trip).
+    if (result.success) expect(result.data.locale).toBeUndefined();
+  });
+
+  it("round-trips a valid locale string unchanged", () => {
+    const result = newThreadSchema.safeParse({ ...validThreadPayload, locale: "tr-TR" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.locale).toBe("tr-TR");
+  });
+
+  it("still bounds locale length at 32 characters", () => {
+    expect(
+      newThreadSchema.safeParse({ ...validThreadPayload, locale: "a".repeat(32) }).success,
+    ).toBe(true);
+    expect(
+      newThreadSchema.safeParse({ ...validThreadPayload, locale: "a".repeat(33) }).success,
+    ).toBe(false);
+  });
+
+  it("still rejects an empty-string locale (omit it or send null instead)", () => {
+    expect(newThreadSchema.safeParse({ ...validThreadPayload, locale: "" }).success).toBe(false);
   });
 
   it("accepts any free-form category string (not a closed enum)", () => {

@@ -20,4 +20,7 @@ export * from "./access";
 export * from "./rate-limit";
 export * from "./png";
 
-export const VERSION = "0.1.0";
+// Re-exported from `../version`, the single source for the package version —
+// see its header. It imports nothing, so this entry stays as React-free,
+// Next-free and DOM-free as the rest of this file promises.
+export { VERSION } from "../version";

@@ -36,4 +36,8 @@ export type {
   UnlockRenderProps,
 } from "./overlay/overlay-root";
 
-export const VERSION = "0.1.0";
+// Re-exported, not redeclared: all five entry points carry a `VERSION`
+// binding, and `./version` is the one place the literal lives. See that
+// file's header for why the value is hand-written rather than read from
+// `package.json`, and what keeps the two in step.
+export { VERSION } from "./version";

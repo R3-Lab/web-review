@@ -5,12 +5,14 @@ import {
   getAccessConfig,
   mintAccessToken,
   passwordMatches,
+  readCookieValue,
+  requireReviewAccess,
   resolveAccess,
   serializeAccessCookie,
   toSetCookieHeader,
   verifyAccessToken,
 } from "./access";
-import type { AccessConfig } from "./access";
+import type { AccessConfig, ReviewAccessOptions } from "./access";
 
 const config: AccessConfig = { password: "hunter2", secret: "signing-secret" };
 
@@ -199,6 +201,236 @@ describe("resolveAccess — ordering and admin fallback", () => {
       throw new Error("db down");
     };
     await expect(resolveAccess(undefined, config, isAdmin, 1_000)).resolves.toEqual({ ok: false });
+  });
+});
+
+describe("readCookieValue", () => {
+  it("reads a lone cookie", () => {
+    expect(readCookieValue("r3wr.access=abc", "r3wr.access")).toBe("abc");
+  });
+
+  it("keeps a value containing '=' intact (splits at the first '=' only)", () => {
+    // The bug this function exists to prevent: splitting on every '='
+    // truncates base64 padding — and a truncated token fails its signature
+    // check, so the symptom is an unexplained 401 on a perfectly good
+    // cookie.
+    expect(readCookieValue("sid=YWJjZA==", "sid")).toBe("YWJjZA==");
+    expect(readCookieValue("sid=a=b=c=d", "sid")).toBe("a=b=c=d");
+  });
+
+  it("finds the requested cookie among several, wherever it sits", () => {
+    const header = "session=xyz; r3wr.access=wanted; theme=dark";
+    expect(readCookieValue(header, "r3wr.access")).toBe("wanted");
+    expect(readCookieValue(header, "session")).toBe("xyz");
+    expect(readCookieValue(header, "theme")).toBe("dark");
+  });
+
+  it("tolerates surrounding whitespace around names and values", () => {
+    expect(readCookieValue("  session=xyz ;   r3wr.access =  wanted  ", "r3wr.access")).toBe(
+      "wanted",
+    );
+  });
+
+  it("returns undefined for an absent header, in every shape a server reports one", () => {
+    expect(readCookieValue(null, "r3wr.access")).toBeUndefined();
+    expect(readCookieValue(undefined, "r3wr.access")).toBeUndefined();
+    expect(readCookieValue("", "r3wr.access")).toBeUndefined();
+  });
+
+  it("returns undefined when the header has other cookies but not this one", () => {
+    expect(readCookieValue("session=xyz; theme=dark", "r3wr.access")).toBeUndefined();
+  });
+
+  it("matches the cookie name exactly, never as a suffix or prefix", () => {
+    expect(readCookieValue("other.r3wr.access=nope", "r3wr.access")).toBeUndefined();
+    expect(readCookieValue("r3wr.access.stale=nope", "r3wr.access")).toBeUndefined();
+  });
+
+  it("skips a valueless segment without derailing the scan", () => {
+    expect(readCookieValue("flag; r3wr.access=wanted", "r3wr.access")).toBe("wanted");
+  });
+
+  it("percent-decodes an encoded value", () => {
+    expect(readCookieValue("note=a%20b", "note")).toBe("a b");
+  });
+
+  it("hands back the raw value when a percent-escape is malformed, rather than throwing", () => {
+    expect(readCookieValue("note=100%", "note")).toBe("100%");
+  });
+
+  it("round-trips a real minted token through a Cookie header alongside other cookies", () => {
+    const descriptor = serializeAccessCookie(config, { now: 1_000 });
+    const header = `session=xyz; ${descriptor.name}=${descriptor.value}; theme=dark`;
+    const token = readCookieValue(header, descriptor.name);
+    expect(verifyAccessToken(token, config, 1_000)).toBe(true);
+  });
+});
+
+describe("requireReviewAccess", () => {
+  const enabled: ReviewAccessOptions = { password: "hunter2", secret: "signing-secret" };
+
+  function request(cookie?: string): Request {
+    const headers = new Headers();
+    if (cookie !== undefined) headers.set("cookie", cookie);
+    return new Request("http://localhost/api/review/shot", { headers });
+  }
+
+  function cookieFor(options: ReviewAccessOptions, now?: number): string {
+    const descriptor = serializeAccessCookie(
+      { password: options.password ?? "", secret: options.secret ?? "" },
+      { cookiePrefix: options.cookiePrefix, now },
+    );
+    return `${descriptor.name}=${descriptor.value}`;
+  }
+
+  it("admits a valid signed cookie without consulting the admin predicate", async () => {
+    let called = false;
+    const verdict = await requireReviewAccess(request(cookieFor(enabled, 1_000)), {
+      access: enabled,
+      isAdmin: () => {
+        called = true;
+        return true;
+      },
+      now: 1_000,
+    });
+    expect(verdict).toEqual({ ok: true, isAdmin: false });
+    expect(called).toBe(false);
+  });
+
+  it("admits a valid cookie sent alongside the app's own cookies", async () => {
+    const verdict = await requireReviewAccess(
+      request(`session=xyz; ${cookieFor(enabled, 1_000)}; theme=dark`),
+      { access: enabled, now: 1_000 },
+    );
+    expect(verdict).toEqual({ ok: true, isAdmin: false });
+  });
+
+  it("refuses when no Cookie header is sent at all", async () => {
+    const verdict = await requireReviewAccess(request(), { access: enabled, now: 1_000 });
+    expect(verdict).toEqual({ ok: false, reason: "locked", status: 401 });
+  });
+
+  it("refuses a malformed cookie value", async () => {
+    const verdict = await requireReviewAccess(request(`${accessCookieName()}=garbage`), {
+      access: enabled,
+      now: 1_000,
+    });
+    expect(verdict).toEqual({ ok: false, reason: "locked", status: 401 });
+  });
+
+  it("refuses a tampered signature", async () => {
+    const parts = mintAccessToken({ password: "hunter2", secret: "signing-secret" }, 1_000).split(
+      ".",
+    );
+    const tampered = `${parts[0]}.${parts[1]}.${parts[2]?.slice(0, -1)}X`;
+    const verdict = await requireReviewAccess(request(`${accessCookieName()}=${tampered}`), {
+      access: enabled,
+      now: 1_000,
+    });
+    expect(verdict).toEqual({ ok: false, reason: "locked", status: 401 });
+  });
+
+  it("refuses an expired cookie", async () => {
+    const ttlMs = 7 * 24 * 60 * 60 * 1000;
+    const cookie = cookieFor(enabled, 1_000);
+    await expect(
+      requireReviewAccess(request(cookie), { access: enabled, now: 1_000 + ttlMs - 1 }),
+    ).resolves.toEqual({ ok: true, isAdmin: false });
+    await expect(
+      requireReviewAccess(request(cookie), { access: enabled, now: 1_000 + ttlMs + 1 }),
+    ).resolves.toEqual({ ok: false, reason: "locked", status: 401 });
+  });
+
+  it("honours a custom cookie prefix, and ignores a cookie under the default name", async () => {
+    const prefixed: ReviewAccessOptions = { ...enabled, cookiePrefix: "myapp" };
+    const wrongName = cookieFor(enabled, 1_000); // minted under "r3wr.access"
+    await expect(
+      requireReviewAccess(request(wrongName), { access: prefixed, now: 1_000 }),
+    ).resolves.toEqual({ ok: false, reason: "locked", status: 401 });
+    await expect(
+      requireReviewAccess(request(cookieFor(prefixed, 1_000)), { access: prefixed, now: 1_000 }),
+    ).resolves.toEqual({ ok: true, isAdmin: false });
+  });
+
+  it("admits via the admin predicate when configuration is otherwise valid", async () => {
+    const verdict = await requireReviewAccess(request(), {
+      access: enabled,
+      isAdmin: () => Promise.resolve(true),
+      now: 1_000,
+    });
+    expect(verdict).toEqual({ ok: true, isAdmin: true });
+  });
+
+  it("treats a throwing admin predicate as 'not admin' rather than propagating", async () => {
+    await expect(
+      requireReviewAccess(request(), {
+        access: enabled,
+        isAdmin: () => {
+          throw new Error("db down");
+        },
+        now: 1_000,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "locked", status: 401 });
+  });
+});
+
+// This is the security-critical block for the guard: a misconfigured
+// deployment must be MORE closed than a configured one, never less. An
+// `isAdmin` predicate that says yes is the tempting escape hatch — it is the
+// consumer's own administrator, after all — and admitting them is precisely
+// what would hide a missing REVIEW_SECRET until a stranger found it instead.
+describe("requireReviewAccess — fail closed, even for an admin", () => {
+  function request(): Request {
+    return new Request("http://localhost/api/review/shot");
+  }
+
+  const alwaysAdmin = () => {
+    throw new Error("isAdmin must never be consulted while the kill switch is off");
+  };
+
+  const misconfigurations: [label: string, access: ReviewAccessOptions][] = [
+    ["secret unset", { password: "hunter2", secret: undefined }],
+    ["secret empty", { password: "hunter2", secret: "" }],
+    ["password unset", { password: undefined, secret: "signing-secret" }],
+    ["password empty", { password: "", secret: "signing-secret" }],
+    ["neither set", { password: undefined, secret: undefined }],
+  ];
+
+  for (const [label, access] of misconfigurations) {
+    it(`${label} ⇒ feature_disabled/404 even though isAdmin would admit`, async () => {
+      const verdict = await requireReviewAccess(request(), { access, isAdmin: alwaysAdmin });
+      expect(verdict).toEqual({ ok: false, reason: "feature_disabled", status: 404 });
+    });
+  }
+
+  it("never calls the admin predicate at all while the kill switch is off", async () => {
+    let called = false;
+    const verdict = await requireReviewAccess(request(), {
+      access: { password: "hunter2", secret: undefined },
+      isAdmin: () => {
+        called = true;
+        return true;
+      },
+    });
+    expect(called).toBe(false);
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("refuses a cookie that WAS valid before the secret went missing", async () => {
+    // Same request, same cookie; only the deployment's config changed.
+    const descriptor = serializeAccessCookie(config, { now: 1_000 });
+    const headers = new Headers({ cookie: `${descriptor.name}=${descriptor.value}` });
+    const req = () => new Request("http://localhost/api/review/shot", { headers });
+
+    await expect(
+      requireReviewAccess(req(), { access: { ...config }, now: 1_000 }),
+    ).resolves.toEqual({ ok: true, isAdmin: false });
+    await expect(
+      requireReviewAccess(req(), {
+        access: { password: config.password, secret: undefined },
+        now: 1_000,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "feature_disabled", status: 404 });
   });
 });
 

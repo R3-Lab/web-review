@@ -252,4 +252,7 @@ function readGate(config: ReviewConfig, storageKey: string): boolean {
   }
 }
 
-export const VERSION = "0.1.0";
+// Re-exported from `../version`, the single source for the package version —
+// see its header. It is a bare constant with no imports, so re-exporting it
+// here adds nothing to this entry's client bundle beyond the string itself.
+export { VERSION } from "../version";

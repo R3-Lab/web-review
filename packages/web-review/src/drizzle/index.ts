@@ -32,4 +32,7 @@ export type {
   NewReviewCommentMysqlRow,
 } from "./mysql";
 
-export const VERSION = "0.1.0";
+// Re-exported from `../version`, the single source for the package version —
+// see its header. It pulls in nothing, so this entry's bundle still reaches
+// `drizzle-orm` and nothing else.
+export { VERSION } from "../version";

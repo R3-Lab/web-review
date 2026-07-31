@@ -13,7 +13,13 @@ import type { ReviewCommentRow, ReviewThreadRow } from "../server/serialize";
 import { deriveTitle } from "../server/serialize";
 import { screenshotKeySchema } from "../server/validation";
 import { createReviewRouteHandlers } from "./routes";
-import type { CreateReviewRouteHandlersOptions, ReviewStore } from "./routes";
+import type {
+  CreateReviewRouteHandlersOptions,
+  ReviewRouteHandlers,
+  ReviewStore,
+  ReviewStoreCreateThreadInput,
+  ReviewStoreListThreadsParams,
+} from "./routes";
 
 const ACCESS: AccessConfig = { password: "hunter2", secret: "signing-secret" };
 
@@ -225,6 +231,38 @@ function buildHandlers(overrides: Partial<CreateReviewRouteHandlersOptions> = {}
   });
 }
 
+/** `POST /threads`, asserting the 201 and handing back the created view. */
+async function createThread(
+  handlers: ReviewRouteHandlers,
+  cookie: string,
+  body: Record<string, unknown> = VALID_THREAD_BODY,
+): Promise<ReviewThreadView> {
+  const res = await handlers.threads.POST(makeRequest("POST", "/threads", { body, cookie }));
+  expect(res.status).toBe(201);
+  return (await readJson<{ thread: ReviewThreadView }>(res)).thread;
+}
+
+/** `GET /threads/:id`, asserting the 200 and handing back the view. */
+async function getThread(
+  handlers: ReviewRouteHandlers,
+  cookie: string,
+  id: string,
+): Promise<ReviewThreadView> {
+  const res = await handlers.thread.GET(makeRequest("GET", `/threads/${id}`, { cookie }), ctx(id));
+  expect(res.status).toBe(200);
+  return (await readJson<{ thread: ReviewThreadView }>(res)).thread;
+}
+
+/** `GET /threads?urlKey=/`, asserting the 200 and handing back the page. */
+async function listThreads(
+  handlers: ReviewRouteHandlers,
+  cookie: string,
+): Promise<ReviewThreadView[]> {
+  const res = await handlers.threads.GET(makeRequest("GET", "/threads?urlKey=/", { cookie }));
+  expect(res.status).toBe(200);
+  return (await readJson<{ threads: ReviewThreadView[] }>(res)).threads;
+}
+
 // ---------------------------------------------------------------------------
 // Feature disabled (kill switch)
 // ---------------------------------------------------------------------------
@@ -291,6 +329,16 @@ describe("access gate", () => {
     expect(res.status).toBe(200);
   });
 
+  it("valid cookie sent among the app's own cookies ⇒ 200", async () => {
+    // A neighbouring cookie whose value contains '=' (base64 padding) must
+    // not derail the scan for ours — see `readCookieValue` in
+    // `../server/access`, which is the parser this route runs.
+    const handlers = buildHandlers();
+    const cookie = `session=YWJjZA==; ${cookieHeaderFor(ACCESS)}; theme=dark`;
+    const res = await handlers.threads.GET(makeRequest("GET", "/threads?urlKey=/", { cookie }));
+    expect(res.status).toBe(200);
+  });
+
   it("every response carries X-Robots-Tag and Cache-Control, success or error", async () => {
     const handlers = buildHandlers();
     const locked = await handlers.threads.GET(makeRequest("GET", "/threads?urlKey=/"));
@@ -300,6 +348,70 @@ describe("access gate", () => {
     for (const res of [locked, ok]) {
       expect(res.headers.get("X-Robots-Tag")).toBe("noindex, nofollow, noarchive");
       expect(res.headers.get("Cache-Control")).toBe("no-store");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// review.requireAccess — the same gate, exposed for a consumer's own routes
+// ---------------------------------------------------------------------------
+
+describe("review.requireAccess", () => {
+  it("admits a valid cookie and reports how the caller got in", async () => {
+    const handlers = buildHandlers();
+    const req = makeRequest("GET", "/shot", { cookie: cookieHeaderFor(ACCESS) });
+    await expect(handlers.requireAccess(req)).resolves.toEqual({ ok: true, isAdmin: false });
+  });
+
+  it("admits an admin without a cookie, and says so", async () => {
+    const handlers = buildHandlers({ isAdmin: () => true });
+    await expect(handlers.requireAccess(makeRequest("GET", "/shot"))).resolves.toEqual({
+      ok: true,
+      isAdmin: true,
+    });
+  });
+
+  it("refuses an unauthenticated caller with the 401 the routes use", async () => {
+    const handlers = buildHandlers();
+    await expect(handlers.requireAccess(makeRequest("GET", "/shot"))).resolves.toEqual({
+      ok: false,
+      reason: "locked",
+      status: 401,
+    });
+  });
+
+  it("refuses with feature_disabled/404 when the kill switch is off, even for an admin", async () => {
+    const handlers = buildHandlers({
+      access: { password: "hunter2", secret: undefined },
+      isAdmin: () => true,
+    });
+    await expect(handlers.requireAccess(makeRequest("GET", "/shot"))).resolves.toEqual({
+      ok: false,
+      reason: "feature_disabled",
+      status: 404,
+    });
+  });
+
+  it("answers exactly what the factory's own routes answer, request for request", async () => {
+    // The point of exposing the guard is that an auxiliary route cannot end
+    // up more permissive than the ones beside it. Assert that directly:
+    // same handlers, same request, same status and error code.
+    const cases: { label: string; handlers: ReviewRouteHandlers; cookie?: string }[] = [
+      { label: "no cookie", handlers: buildHandlers() },
+      { label: "bad cookie", handlers: buildHandlers(), cookie: "r3wr.access=garbage" },
+      {
+        label: "kill switch off",
+        handlers: buildHandlers({ access: { password: undefined, secret: undefined }, isAdmin: () => true }),
+      },
+    ];
+
+    for (const { label, handlers, cookie } of cases) {
+      const verdict = await handlers.requireAccess(makeRequest("GET", "/threads?urlKey=/", { cookie }));
+      const res = await handlers.threads.GET(makeRequest("GET", "/threads?urlKey=/", { cookie }));
+      expect(verdict.ok, label).toBe(false);
+      if (verdict.ok) continue;
+      expect(res.status, label).toBe(verdict.status);
+      expect((await readJson<ErrorBody>(res)).error, label).toBe(verdict.reason);
     }
   });
 });
@@ -446,6 +558,69 @@ describe("POST /threads", () => {
     expect(res.status).toBe(201);
     const { thread } = await readJson<{ thread: ReviewThreadView }>(res);
     expect(thread.title).toBe(deriveTitle(VALID_THREAD_BODY.firstComment));
+  });
+
+  // Regression: `locale` was the one optional create field that had to be
+  // present, so a caller who simply left it out got a 400. It is `.nullish()`
+  // now; what this guards is the other half of that fix — the omitted case
+  // must reach the store and the wire as `null`, not as the `undefined` zod
+  // parses it to, since `undefined` would drop the key from the JSON body.
+  it("an omitted locale is accepted and lands as null, not undefined", async () => {
+    const handlers = buildHandlers();
+    const cookie = cookieHeaderFor(ACCESS);
+    const withoutLocale: Record<string, unknown> = { ...VALID_THREAD_BODY };
+    delete withoutLocale["locale"];
+
+    const res = await handlers.threads.POST(
+      makeRequest("POST", "/threads", { body: withoutLocale, cookie }),
+    );
+    expect(res.status).toBe(201);
+    const { thread } = await readJson<{ thread: ReviewThreadView }>(res);
+    expect(thread.locale).toBeNull();
+
+    // Read it back: the fake store copies `input.locale` verbatim onto the
+    // row, so a `null` here proves the normalization happened before storage
+    // rather than only on the create response.
+    const fetched = await handlers.thread.GET(
+      makeRequest("GET", `/threads/${thread.id}`, { cookie }),
+      ctx(thread.id),
+    );
+    expect(fetched.status).toBe(200);
+    const reread = await readJson<{ thread: ReviewThreadView }>(fetched);
+    expect(reread.thread.locale).toBeNull();
+  });
+
+  it("an explicit null locale still round-trips as null", async () => {
+    const handlers = buildHandlers();
+    const cookie = cookieHeaderFor(ACCESS);
+    const res = await handlers.threads.POST(
+      makeRequest("POST", "/threads", { body: { ...VALID_THREAD_BODY, locale: null }, cookie }),
+    );
+    expect(res.status).toBe(201);
+    expect((await readJson<{ thread: ReviewThreadView }>(res)).thread.locale).toBeNull();
+  });
+
+  it("a valid locale string still round-trips unchanged", async () => {
+    const handlers = buildHandlers();
+    const cookie = cookieHeaderFor(ACCESS);
+    const res = await handlers.threads.POST(
+      makeRequest("POST", "/threads", { body: { ...VALID_THREAD_BODY, locale: "tr-TR" }, cookie }),
+    );
+    expect(res.status).toBe(201);
+    expect((await readJson<{ thread: ReviewThreadView }>(res)).thread.locale).toBe("tr-TR");
+  });
+
+  it("an over-long locale is still rejected with 400", async () => {
+    const handlers = buildHandlers();
+    const cookie = cookieHeaderFor(ACCESS);
+    const res = await handlers.threads.POST(
+      makeRequest("POST", "/threads", {
+        body: { ...VALID_THREAD_BODY, locale: "a".repeat(33) },
+        cookie,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect((await readJson<ErrorBody>(res)).error).toBe("bad_request");
   });
 
   it("a forged screenshotKey (wrong prefix) is rejected with 400", async () => {
@@ -833,5 +1008,391 @@ describe("404 code discrimination", () => {
     const missingBody = await readJson<ErrorBody>(missingRes);
     const missingErr = new ReviewApiError(missingRes.status, "missing", missingBody.error);
     expect(isFeatureDisabled(missingErr)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// screenshotUrl resolution
+// ---------------------------------------------------------------------------
+//
+// `ReviewStore.screenshotUrl` returns `string | null` OR a promise of one.
+// The async half is the whole point: a private bucket cannot be served by
+// string concatenation — it needs a presigned, expiring URL, and every SDK
+// that mints one is asynchronous. These tests pin the properties that make
+// relying on that safe: existing SYNCHRONOUS stores keep working untouched,
+// a list resolves in PARALLEL rather than in series, one failing key cannot
+// take down a whole response, a thread with no screenshot never reaches the
+// store at all, and a class-based store that reads `this` still works.
+
+const SHOT_A = "review/shot-a.png";
+const SHOT_B = "review/shot-b.png";
+const SHOT_C = "review/shot-c.png";
+
+/**
+ * A `screenshotUrl` resolver that PROVES concurrency rather than assuming
+ * it. A test asserting only the resolved VALUES would pass against a
+ * sequential `for (const key of keys) await resolve(key)` loop just as
+ * happily, so this probe makes sequential resolution observable.
+ *
+ * Two overlapping mechanisms:
+ *
+ *  - A BARRIER: no call may settle until `expected` calls have been
+ *    entered. A sequential implementation cannot satisfy that even in
+ *    principle — its first call would be waiting on a barrier that only its
+ *    second call can open.
+ *  - A HIGH-WATER MARK of simultaneously in-flight calls, asserted against
+ *    `expected`.
+ *
+ * The barrier carries a safety release so a sequential implementation fails
+ * on a legible assertion (a `maxInFlight` of 1) instead of deadlocking
+ * until the suite times out. Under a correct `Promise.all` that timer never
+ * fires: every call is entered in the same synchronous burst, so the
+ * barrier opens immediately and the probe costs no wall-clock time.
+ */
+function concurrencyProbe(expected: number, safetyMs = 2_000) {
+  /** Every key the resolver was asked about, in call order. */
+  const keys: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let open!: () => void;
+  const allEntered = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const safety = setTimeout(() => open(), safetyMs);
+
+  return {
+    keys,
+    get maxInFlight() {
+      return maxInFlight;
+    },
+    /** Clears the safety timer so a finished test leaves nothing pending. */
+    dispose() {
+      clearTimeout(safety);
+      open();
+    },
+    screenshotUrl: async (key: string): Promise<string> => {
+      keys.push(key);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      if (keys.length >= expected) {
+        clearTimeout(safety);
+        open();
+      }
+      await allEntered;
+      inFlight -= 1;
+      return `https://signed.example.com/${key}`;
+    },
+  };
+}
+
+/**
+ * A class-based store whose `screenshotUrl` reads `this`. `routes.ts`
+ * deliberately invokes `store.screenshotUrl(...)` as a method rather than
+ * extracting it into a bare local reference — extracting one would unbind
+ * `this` and make `this.cdnBase` below `undefined` at call time. This class
+ * is what pins that property; every other method delegates to a plain fake
+ * store so only the `this`-dependence is under test. It is async as well as
+ * `this`-dependent, so it covers both halves at once.
+ */
+class ClassBasedStore implements ReviewStore {
+  private readonly inner = createFakeStore({ withScreenshot: false });
+
+  constructor(private readonly cdnBase: string) {}
+
+  listThreads(params: ReviewStoreListThreadsParams) {
+    return this.inner.listThreads(params);
+  }
+
+  getThread(id: string) {
+    return this.inner.getThread(id);
+  }
+
+  createThread(input: ReviewStoreCreateThreadInput) {
+    return this.inner.createThread(input);
+  }
+
+  addComment(threadId: string, input: NewCommentInput) {
+    return this.inner.addComment(threadId, input);
+  }
+
+  setStatus(threadId: string, status: ReviewStatus, resolvedBy: string | null) {
+    return this.inner.setStatus(threadId, status, resolvedBy);
+  }
+
+  async screenshotUrl(key: string): Promise<string> {
+    await Promise.resolve();
+    return `${this.cdnBase}/${key}`;
+  }
+}
+
+describe("screenshotUrl resolution", () => {
+  it("an async screenshotUrl resolves on the create, get, patch and list paths", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    store.screenshotUrl = async (key) => {
+      await Promise.resolve();
+      return `https://signed.example.com/${key}?sig=abc`;
+    };
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+    const expected = `https://signed.example.com/${SHOT_A}?sig=abc`;
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(created.screenshotUrl).toBe(expected);
+
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBe(expected);
+
+    const listed = await listThreads(handlers, cookie);
+    expect(listed.map((thread) => thread.screenshotUrl)).toEqual([expected]);
+
+    const patched = await handlers.thread.PATCH(
+      makeRequest("PATCH", `/threads/${created.id}`, { body: { status: "resolved" }, cookie }),
+      ctx(created.id),
+    );
+    expect(patched.status).toBe(200);
+    expect((await readJson<{ thread: ReviewThreadView }>(patched)).thread.screenshotUrl).toBe(
+      expected,
+    );
+  });
+
+  // THE COMPATIBILITY GUARANTEE. Widening the return type to
+  // `string | null | Promise<string | null>` is not a breaking change,
+  // because `screenshotUrl` is a method consumers IMPLEMENT and this
+  // package CALLS: variance runs the helpful way and an existing
+  // synchronous implementation still satisfies the wider type. The
+  // assignment below is deliberately a plain, non-async function with no
+  // cast and no annotation — if the widening had broken sync stores, this
+  // file would fail to compile before it ever ran.
+  it("a synchronous screenshotUrl still works untouched", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    store.screenshotUrl = (key) => `https://cdn.example.com/${key}`;
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+    const expected = `https://cdn.example.com/${SHOT_A}`;
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(created.screenshotUrl).toBe(expected);
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBe(expected);
+    expect((await listThreads(handlers, cookie)).map((t) => t.screenshotUrl)).toEqual([expected]);
+  });
+
+  it("a synchronous screenshotUrl returning null still reports null", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    store.screenshotUrl = () => null;
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(created.screenshotUrl).toBeNull();
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBeNull();
+  });
+
+  it("a store with no screenshotUrl at all yields null everywhere", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    // `in` rather than a bare `store.screenshotUrl` reference: the method is
+    // genuinely absent, not present-and-undefined, and reading it bare is
+    // exactly the unbound-method pattern `routes.ts` avoids on purpose.
+    expect("screenshotUrl" in store).toBe(false);
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(created.screenshotUrl).toBeNull();
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBeNull();
+    expect((await listThreads(handlers, cookie)).map((t) => t.screenshotUrl)).toEqual([null]);
+  });
+
+  // THE PARALLELISM GUARANTEE. `GET /threads` returns up to 500 rows;
+  // resolving presigned URLs one after another would turn a single round
+  // trip into N sequential ones and make a real list unusable. The probe —
+  // not the returned values — is what proves it: see `concurrencyProbe`.
+  it("resolves a list of threads concurrently, not one after another", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+    const keys = [SHOT_A, SHOT_B, SHOT_C, "review/shot-d.png", "review/shot-e.png"];
+
+    // Created BEFORE the probe is attached: the create path resolves its own
+    // one-row page, and those single calls would open the barrier early.
+    for (const screenshotKey of keys) {
+      await createThread(handlers, cookie, { ...VALID_THREAD_BODY, screenshotKey });
+    }
+
+    const probe = concurrencyProbe(keys.length);
+    store.screenshotUrl = probe.screenshotUrl;
+    try {
+      const listed = await listThreads(handlers, cookie);
+
+      expect(listed).toHaveLength(keys.length);
+      // Every call was in flight at the same moment. A sequential
+      // implementation tops out at 1 here.
+      expect(probe.maxInFlight).toBe(keys.length);
+      expect([...probe.keys].sort()).toEqual([...keys].sort());
+      // …and every row still carries its own URL, so the concurrency did
+      // not come at the cost of correctness.
+      expect(new Set(listed.map((thread) => thread.screenshotUrl))).toEqual(
+        new Set(keys.map((key) => `https://signed.example.com/${key}`)),
+      );
+    } finally {
+      probe.dispose();
+    }
+  });
+
+  it("a rejected screenshotUrl nulls that thread alone and leaves its siblings intact", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    const created: ReviewThreadView[] = [];
+    for (const screenshotKey of [SHOT_A, SHOT_B, SHOT_C]) {
+      created.push(await createThread(handlers, cookie, { ...VALID_THREAD_BODY, screenshotKey }));
+    }
+
+    store.screenshotUrl = async (key) => {
+      await Promise.resolve();
+      if (key === SHOT_B) throw new Error("presign failed: object missing");
+      return `https://signed.example.com/${key}`;
+    };
+
+    const listed = await listThreads(handlers, cookie);
+    expect(listed).toHaveLength(3);
+
+    // One rejected key must not 500 the page, nor null out its siblings —
+    // the same posture the write path takes, where a failed capture never
+    // costs a reviewer their comment.
+    const urls = new Map(listed.map((thread) => [thread.id, thread.screenshotUrl]));
+    expect(urls.get(created[0]?.id ?? "")).toBe(`https://signed.example.com/${SHOT_A}`);
+    expect(urls.get(created[1]?.id ?? "")).toBeNull();
+    expect(urls.get(created[2]?.id ?? "")).toBe(`https://signed.example.com/${SHOT_C}`);
+
+    // The single-thread read path degrades the same way.
+    expect((await getThread(handlers, cookie, created[1]?.id ?? "")).screenshotUrl).toBeNull();
+  });
+
+  it("a synchronously thrown screenshotUrl error is survivable too", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    store.screenshotUrl = (key) => {
+      if (key === SHOT_B) throw new Error("misconfigured bucket");
+      return `https://cdn.example.com/${key}`;
+    };
+
+    const ok = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(ok.screenshotUrl).toBe(`https://cdn.example.com/${SHOT_A}`);
+
+    const broken = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_B,
+    });
+    expect(broken.screenshotUrl).toBeNull();
+  });
+
+  it("a thread with a null screenshotKey never invokes the resolver", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+    const asked: string[] = [];
+    store.screenshotUrl = (key) => {
+      asked.push(key);
+      return `https://cdn.example.com/${key}`;
+    };
+
+    const created = await createThread(handlers, cookie);
+    expect(created.screenshotUrl).toBeNull();
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBeNull();
+    expect((await listThreads(handlers, cookie)).map((t) => t.screenshotUrl)).toEqual([null]);
+    expect(asked).toEqual([]);
+  });
+
+  // Deduplication falls out of needing a key→URL map at all: distinct keys
+  // are what fills it. Two threads sharing one screenshot therefore cost
+  // one presign, not two.
+  it("resolves each distinct key once, however many threads share it", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    for (const screenshotKey of [SHOT_A, SHOT_A, SHOT_A, SHOT_B]) {
+      await createThread(handlers, cookie, { ...VALID_THREAD_BODY, screenshotKey });
+    }
+
+    const asked: string[] = [];
+    store.screenshotUrl = async (key) => {
+      asked.push(key);
+      await Promise.resolve();
+      return `https://signed.example.com/${key}`;
+    };
+
+    const listed = await listThreads(handlers, cookie);
+    expect(listed).toHaveLength(4);
+    expect([...asked].sort()).toEqual([SHOT_A, SHOT_B]);
+    expect(listed.filter((t) => t.screenshotUrl === `https://signed.example.com/${SHOT_A}`)).toHaveLength(3);
+    expect(listed.filter((t) => t.screenshotUrl === `https://signed.example.com/${SHOT_B}`)).toHaveLength(1);
+  });
+
+  // `POST /threads/:id/comments` answers with a COMMENT view, not a thread
+  // view — there is no `screenshotUrl` on that wire shape for the route to
+  // resolve, and nothing to await. What the add-comment path must not do is
+  // disturb the thread's screenshot, so this covers it from the read side:
+  // the reply lands, and the next read of that thread still resolves.
+  it("adding a comment leaves the thread's async screenshotUrl resolving", async () => {
+    const store = createFakeStore({ withScreenshot: false });
+    store.screenshotUrl = async (key) => {
+      await Promise.resolve();
+      return `https://signed.example.com/${key}`;
+    };
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+
+    const res = await handlers.comments.POST(
+      makeRequest("POST", `/threads/${created.id}/comments`, {
+        body: { body: "still broken", authorId: "u2", authorName: "Bea" },
+        cookie,
+      }),
+      ctx(created.id),
+    );
+    expect(res.status).toBe(201);
+    const { comment } = await readJson<{ comment: ReviewCommentView }>(res);
+    expect(comment.body).toBe("still broken");
+
+    const reread = await getThread(handlers, cookie, created.id);
+    expect(reread.screenshotUrl).toBe(`https://signed.example.com/${SHOT_A}`);
+    expect(reread.commentCount).toBe(2);
+  });
+
+  it("a class-based store whose screenshotUrl reads `this` keeps working", async () => {
+    const store = new ClassBasedStore("https://class.example.com");
+    const handlers = buildHandlers({ store });
+    const cookie = cookieHeaderFor(ACCESS);
+    const expected = `https://class.example.com/${SHOT_A}`;
+
+    const created = await createThread(handlers, cookie, {
+      ...VALID_THREAD_BODY,
+      screenshotKey: SHOT_A,
+    });
+    expect(created.screenshotUrl).toBe(expected);
+    expect((await getThread(handlers, cookie, created.id)).screenshotUrl).toBe(expected);
+    expect((await listThreads(handlers, cookie)).map((t) => t.screenshotUrl)).toEqual([expected]);
   });
 });

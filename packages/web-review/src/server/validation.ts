@@ -89,7 +89,23 @@ export const newThreadSchema = z.object({
   project: z.string().min(1).max(64).optional(),
   url: trimmedNonEmpty(2048),
   urlKey: trimmedNonEmpty(MAX_URL_KEY),
-  locale: localeSchema.nullable(),
+  /**
+   * `.nullish()`, not `.nullable()`. `.nullable()` accepts `null` but still
+   * REQUIRES the key to be present, so a consumer whose site has no notion
+   * of locale had to send `locale: null` on every create — while `route`,
+   * `title` and `screenshotKey` right below, equally optional, could simply
+   * be left out. That asymmetry was an oversight rather than a rule: nothing
+   * downstream distinguishes "absent" from "explicitly null". The column is
+   * nullable on both supported engines, and `ReviewThreadView.locale` is
+   * `string | null` (see `../core/types.ts`), so both spellings describe the
+   * same thread.
+   *
+   * An omitted key parses to `undefined`, not `null`. The two are collapsed
+   * at the storage boundary — see `locale: input.locale ?? null` in
+   * `POST /threads` (`../next/routes.ts`) — so `undefined` never reaches a
+   * store, a row, or the wire.
+   */
+  locale: localeSchema.nullish(),
   route: z.string().max(512).nullish(),
   title: z.string().max(200).nullish(),
   category: categorySchema,

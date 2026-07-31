@@ -32,4 +32,7 @@
 
 export * from "./routes";
 
-export const VERSION = "0.1.0";
+// Re-exported from `../version`, the single source for the package version —
+// see its header. `../version` has no imports of its own, so this stays a
+// server-safe entry: nothing it pulls in can reach a `"use client"` module.
+export { VERSION } from "../version";
