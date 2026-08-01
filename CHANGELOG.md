@@ -17,8 +17,6 @@ two things that cost an integrator real work.
 
 ## [0.3.0] — 2026-07-31
 
-*Not yet published to npm.*
-
 **Schema: no change.** **Store interface: changed — widened, non-breaking for
 implementers.** No export subpath, dependency, or peer-dependency range changed.
 
@@ -232,3 +230,10 @@ actually encountered.
   coincidence, but it was not updated for 0.2.0 either (fixed in 0.3.0).
 
 Commit: `609b91b`.
+
+<!-- Each heading above links to the diff that produced that release. 0.1.0 has
+     no predecessor to compare against, so it points at the tag itself. -->
+
+[0.3.0]: https://github.com/R3-Lab/web-review/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/R3-Lab/web-review/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/R3-Lab/web-review/releases/tag/v0.1.0
