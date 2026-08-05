@@ -1,12 +1,19 @@
 /**
  * `ThreadHighlight` — the captured highlight boxes, redrawn over a thread's
- * anchored element (or, when drifted, its historical position).
+ * anchored element (or, when the anchor no longer binds here, its historical
+ * position).
  *
  * Ported from a working single-app review tool's `feedback-overlay-inner.tsx`
  * `ThreadHighlight` component. Renders nothing for a legacy `point` pin (no
  * rects). Text highlights read as a highlighter swipe under the words;
  * element highlights read as an outlined box so they never hide the design
  * under review.
+ *
+ * Carries the same two `data-*` flags as `./pin` — `data-drifted` for a weak
+ * match, `data-unplaceable` for no match at all — so a highlight and its pin
+ * never tell a reviewer two different stories about the same anchor, and so
+ * `overlay.css` can give each its own FORM (dashed vs dotted) rather than
+ * distinguishing them by hue. See `helpers.ts#anchorPlacement`.
  */
 
 import type { CSSProperties } from "react";
@@ -14,7 +21,7 @@ import type { CSSProperties } from "react";
 import { OVERLAY_ATTR } from "../anchor";
 import type { ResolveResult, ReviewCategoryDef, ReviewThreadView } from "../core/types";
 import type { DocRect } from "./helpers";
-import { categoryAccent, isDrifted, resolveCategory } from "./helpers";
+import { anchorPlacement, categoryAccent, resolveCategory } from "./helpers";
 
 const TAG = { [OVERLAY_ATTR]: "" } as const;
 
@@ -29,17 +36,18 @@ export function ThreadHighlight({ thread, selected, resolved, categories }: Thre
   const rectsPct = thread.anchor.highlightRectsPct;
   if (!rectsPct || rectsPct.length === 0) return null;
 
-  const drifted = isDrifted(resolved);
+  const placement = anchorPlacement(resolved);
 
   // Base in DOCUMENT coords: the live rect when the bind is confident, else
-  // the absolute captured rect so a drifted highlight still shows somewhere.
+  // the absolute captured rect so a drifted or unplaceable highlight still
+  // shows somewhere rather than vanishing.
   const base: DocRect =
-    resolved?.rect && !drifted
+    placement.state === "anchored"
       ? {
-          left: resolved.rect.left + window.scrollX,
-          top: resolved.rect.top + window.scrollY,
-          width: resolved.rect.width,
-          height: resolved.rect.height,
+          left: placement.rect.left + window.scrollX,
+          top: placement.rect.top + window.scrollY,
+          width: placement.rect.width,
+          height: placement.rect.height,
         }
       : {
           left: thread.anchor.rect.x,
@@ -71,7 +79,8 @@ export function ThreadHighlight({ thread, selected, resolved, categories }: Thre
           data-kind={kind}
           data-status={thread.status}
           data-selected={selected}
-          data-drifted={drifted}
+          data-drifted={placement.state === "drifted"}
+          data-unplaceable={placement.state === "unplaceable"}
           {...TAG}
           style={
             {

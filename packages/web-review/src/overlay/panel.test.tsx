@@ -88,6 +88,7 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
   const onFilterChange = vi.fn();
   const onSelect = vi.fn();
   const onToggleHighlights = vi.fn();
+  const onToggleShowPins = vi.fn();
   const onTogglePinDrop = vi.fn();
   const onClose = vi.fn();
   const onBack = vi.fn();
@@ -108,6 +109,11 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
     panelSide: "right",
     showHighlights: true,
     onToggleHighlights,
+    showPins: true,
+    onToggleShowPins,
+    // The ordinary case: every pin on this page found its anchor, so the
+    // summary is absent. Cases that expect it say so explicitly.
+    unplaceableCount: 0,
     pinDropMode: false,
     onTogglePinDrop,
     onClose,
@@ -124,6 +130,7 @@ function renderPanel(propsOverride: Partial<PanelRenderProps> = {}) {
     onFilterChange,
     onSelect,
     onToggleHighlights,
+    onToggleShowPins,
     onTogglePinDrop,
     onClose,
     onBack,
@@ -186,6 +193,41 @@ describe("Panel", () => {
     const { onToggleHighlights } = renderPanel();
     await user.click(screen.getByRole("checkbox", { name: /highlights/i }));
     expect(onToggleHighlights).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onToggleShowPins when the pins checkbox is toggled, and nothing else", async () => {
+    const user = userEvent.setup();
+    const { onToggleShowPins, onToggleHighlights } = renderPanel();
+    await user.click(screen.getByRole("checkbox", { name: /^pins$/i }));
+    expect(onToggleShowPins).toHaveBeenCalledTimes(1);
+    // The two layers are independent axes, and the wiring is the first place
+    // that can quietly stop being true.
+    expect(onToggleHighlights).not.toHaveBeenCalled();
+  });
+
+  it("reflects each visibility prop on its own checkbox, in every combination", () => {
+    const cases: [boolean, boolean][] = [
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ];
+    for (const [showPins, showHighlights] of cases) {
+      renderPanel({ showPins, showHighlights });
+      const pins = screen.getByRole("checkbox", { name: /^pins$/i });
+      const highlights = screen.getByRole("checkbox", { name: /highlights/i });
+      if (showPins) expect(pins).toBeChecked();
+      else expect(pins).not.toBeChecked();
+      if (showHighlights) expect(highlights).toBeChecked();
+      else expect(highlights).not.toBeChecked();
+      cleanup();
+    }
+  });
+
+  it("groups the two visibility switches under a name of their own", () => {
+    renderPanel();
+    const group = screen.getByRole("group", { name: /show on the page/i });
+    expect(within(group).getAllByRole("checkbox")).toHaveLength(2);
   });
 
   it("calls onClose when the close button is clicked", async () => {
@@ -279,24 +321,43 @@ describe("Panel — the New comment control", () => {
 });
 
 // The strip documents the OVERLAY, not the list, so it is present on both
-// views — and every entry names a binding that really exists (`c` and Escape
-// in `OverlayRoot`'s keydown handler, the arrow keys in `Launcher`'s).
+// views — and every entry names a binding that really exists (`c`, Escape and
+// the held `h` in `OverlayRoot`'s keydown handlers, the arrow keys in
+// `Launcher`'s).
 describe("Panel — the keyboard shortcuts footer", () => {
   function expectShortcuts() {
     const list = screen.getByRole("list", { name: /keyboard shortcuts/i });
     const items = within(list).getAllByRole("listitem");
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     expect(items[0]!).toHaveTextContent(/^C\s*New pin$/);
     expect(items[1]!).toHaveTextContent(/^Esc\s*Close \/ cancel$/);
+    // A key that must be HELD, and the label has to say so — a reviewer who
+    // taps it and sees nothing happen would reasonably conclude it is broken.
+    expect(items[2]!).toHaveTextContent(/^H\s*Hold to click through the pins$/);
     // The arrows are the WCAG 2.5.7 alternative to dragging the launcher and
     // only work while it has focus — the label must not imply they are global.
-    expect(items[2]!).toHaveTextContent(/while it has focus/i);
-    expect(within(items[2]!).getAllByText(/^[←↑↓→]$/)).toHaveLength(4);
+    expect(items[3]!).toHaveTextContent(/while it has focus/i);
+    expect(within(items[3]!).getAllByText(/^[←↑↓→]$/)).toHaveLength(4);
   }
 
-  it("renders in the list view, named, with all three shortcuts", () => {
+  it("renders in the list view, named, with all four shortcuts", () => {
     renderPanel();
     expectShortcuts();
+  });
+
+  // The list is called "Keyboard shortcuts" and every row in it is a key, so
+  // the pointer-operated escape is named beside the list rather than inside
+  // it. Both views: it is as true in the detail view as in the list.
+  it("names the persistent Pins switch alongside the held key, outside the list", () => {
+    for (const selected of [null, makeThread({ title: "Selected thread" })]) {
+      renderPanel(selected ? { threads: [selected], selected } : {});
+      const footer = screen.getByRole("list", { name: /keyboard shortcuts/i }).closest("footer");
+      if (!footer) throw new Error("expected the shortcuts list's <footer> ancestor");
+      expect(footer).toHaveTextContent(/hide the pins for good/i);
+      // Beside the list, not a fifth row of it.
+      expect(within(footer).getAllByRole("listitem")).toHaveLength(4);
+      cleanup();
+    }
   });
 
   it("renders in the detail view too", () => {
@@ -313,5 +374,59 @@ describe("Panel — the keyboard shortcuts footer", () => {
     expect(footer.parentElement).toHaveClass("r3wr-panel");
     // Last child, i.e. after `.r3wr-panel-body` — the strip is pinned below it.
     expect(footer.previousElementSibling).toHaveClass("r3wr-panel-body");
+  });
+});
+
+/**
+ * One line for the page in place of N identical badges. These are copy tests
+ * as much as render tests, for the same reason `./pin.test.tsx`'s are: what
+ * this line is allowed to CLAIM is the whole of the feature. An anchor that
+ * resolved to nothing licenses "we did not find it here" and nothing further
+ * — not that the page changed, not that anything was deleted.
+ */
+describe("Panel — the unplaceable-pins summary", () => {
+  /** The summary line, whatever its wording, or `null`. */
+  function summary(): HTMLElement | null {
+    return screen.queryByText(/couldn't be placed/i);
+  }
+
+  it("is absent entirely when every pin found its anchor", () => {
+    renderPanel({ threads: [makeThread()], unplaceableCount: 0 });
+    expect(summary()).toBeNull();
+  });
+
+  it("is singular for one", () => {
+    renderPanel({ threads: [makeThread()], unplaceableCount: 1 });
+    expect(summary()).toHaveTextContent(
+      "1 pin couldn't be placed on this page. It is shown where it was dropped.",
+    );
+  });
+
+  it("is plural for more than one, and carries the count", () => {
+    renderPanel({ threads: [makeThread(), makeThread(), makeThread()], unplaceableCount: 3 });
+    expect(summary()).toHaveTextContent(
+      "3 pins couldn't be placed on this page. They are shown where they were dropped.",
+    );
+  });
+
+  it("does not claim a cause — nothing about drift, change, or a missing element", () => {
+    renderPanel({ threads: [makeThread(), makeThread()], unplaceableCount: 2 });
+    const copy = summary()?.textContent ?? "";
+    expect(copy).not.toMatch(/drift/i);
+    expect(copy).not.toMatch(/chang/i);
+    expect(copy).not.toMatch(/removed|deleted|gone|missing|no longer/i);
+  });
+
+  it("does not replace the pins' own rows — the threads are still listed", () => {
+    const thread = makeThread({ title: "Still listed" });
+    renderPanel({ threads: [thread], unplaceableCount: 1 });
+    expect(summary()).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /still listed/i })).toBeInTheDocument();
+  });
+
+  it("stays out of the detail view, which speaks for one thread at a time", () => {
+    const thread = makeThread({ title: "Selected thread" });
+    renderPanel({ threads: [thread], selected: thread, unplaceableCount: 2 });
+    expect(summary()).toBeNull();
   });
 });

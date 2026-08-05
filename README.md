@@ -24,8 +24,18 @@ team triages from a side panel, no reviewer account required.
 - **Anchors that survive re-renders** — a layered anchor (selector, text
   hint, class fingerprint, ancestor path, geometry) rebinds after a markup
   change or a copy edit; when it can't rebind confidently, the pin still
-  renders at its last known position, badged **drifted**, instead of
-  disappearing.
+  renders where it was dropped instead of disappearing. It's badged
+  **Drifted** when the resolver found a weak match and **Not found** when it
+  matched nothing at all — two different findings, and only the first is
+  evidence your page changed (see [How anchoring
+  works](https://github.com/R3-Lab/web-review/blob/main/docs/anchoring.md)).
+- **Pins that don't trap clicks** — a pin is a real button laid over your
+  page, so it can sit on top of the thing a reviewer wants to click. Hold
+  **`h`** to click straight through the whole pin layer for as long as the
+  key is down, or turn the **Pins** checkbox off to hide them for good. Pins
+  are also scoped to the page they were dropped on, so a slow response for a
+  route you've navigated away from can't paint its pins over the one you're
+  reading.
 - **Reading feedback and leaving it are separate acts** — the launcher opens
   the review panel and nothing else; picking a target is armed explicitly,
   from the panel's own **New comment** button or the `c` shortcut. A reviewer
@@ -64,8 +74,8 @@ reasoning behind each — lives in
 | [REST API and database schema](https://github.com/R3-Lab/web-review/blob/main/docs/api.md) | Every endpoint, request body, and error code; the two tables in both dialects, and why MySQL's differ |
 | [Auth model](https://github.com/R3-Lab/web-review/blob/main/docs/auth.md) | The shared-password gate and signed cookie, plus `requireReviewAccess` and `readCookieValue` for protecting your own routes |
 | [Customizing a surface](https://github.com/R3-Lab/web-review/blob/main/docs/customizing.md) | Replacing or wrapping `Composer`/`Panel`/`ThreadDetail`/`UnlockDialog`, and the render-prop contracts they must satisfy |
-| [How anchoring works](https://github.com/R3-Lab/web-review/blob/main/docs/anchoring.md) | Capture, resolve, confidence scoring, and what the **drifted** badge means |
-| [Keyboard and accessibility](https://github.com/R3-Lab/web-review/blob/main/docs/keyboard.md) | `c`, arrow-key launcher docking, Escape's unwind order, focus traps, live regions |
+| [How anchoring works](https://github.com/R3-Lab/web-review/blob/main/docs/anchoring.md) | Capture, resolve, confidence scoring, what **Drifted** and **Not found** each mean, and how pins are scoped to their page |
+| [Keyboard and accessibility](https://github.com/R3-Lab/web-review/blob/main/docs/keyboard.md) | `c`, hold-`h` click-through, arrow-key launcher docking, Escape's unwind order, focus traps, live regions |
 | [Bundle cost: the full breakdown](https://github.com/R3-Lab/web-review/blob/main/docs/bundle-cost.md) | The measured forensics behind the [summary below](#bundle-cost) |
 
 Release history: [CHANGELOG.md](https://github.com/R3-Lab/web-review/blob/main/CHANGELOG.md).
@@ -343,22 +353,45 @@ source (`src/core/config.ts`):
 | `localeFromHref` | `() => null` | `config.localeFromHref ?? (() => null)` |
 | `urlKeyFromHref` | the package's own `normalizeUrl` | `config.urlKeyFromHref ?? normalizeUrl` |
 | `requireUnlock` | `true` iff `adapter.unlock` is present | `config.requireUnlock ?? config.adapter.unlock != null` |
+| `pollMs` | `30000` | `config.pollMs ?? 30_000` — passed through verbatim, including a non-positive value; see below |
 | `enabled` | `undefined` (left to the mount gate) | `config.enabled` — passthrough, not defaulted |
 | `debug` | `false` | `config.debug ?? false` |
 
+`pollMs` is how often the overlay re-fetches the current page's threads, so
+two reviewers on the same page see each other's pins. It is not the only
+thing that triggers a refetch: the overlay also refetches when the window
+regains focus or the tab becomes visible again — throttled, and skipped while
+the page is going *hidden* — because coming back to a page is exactly the
+moment a reviewer expects to be current, and an interval alone serves that
+badly (it fires while the tab is hidden, then makes them wait out the rest of
+a tick when they return).
+
+So `0` — or any value `<= 0` — disables the **interval and only the
+interval**. It means "refresh when I come back to the page, not on a clock",
+never "never refresh". That's the setting for an app that pays per request,
+or one where the overlay shares a rate limit with the host page.
+`resolveConfig` doesn't clamp the value to a minimum, because "disabled" is a
+state the overlay has to be able to read off the field.
+
 ### localStorage keys
 
-Three keys hang off `storagePrefix` — the reason it's configurable at all is
+Four keys hang off `storagePrefix` — the reason it's configurable at all is
 that two consumers on the same origin would otherwise share them. Every read
 degrades to the default below on a missing, malformed, or unreadable value,
 including when `localStorage` throws outright (Safari private mode), so all
-three are safe to delete and safe to ignore:
+four are safe to delete and safe to ignore:
 
 | Key | Holds | Absent or unreadable |
 |---|---|---|
 | `` `${storagePrefix}.identity` `` | The browser-minted reviewer `{ id, name }` — see [Auth model](https://github.com/R3-Lab/web-review/blob/main/docs/auth.md) | No identity; the composer asks for a name |
 | `` `${storagePrefix}.showHighlights` `` | `"1"`/`"0"`, the panel's **Highlights** checkbox | On |
+| `` `${storagePrefix}.showPins` `` | `"1"`/`"0"`, the panel's **Pins** checkbox — whether the on-page pins are drawn at all | On |
 | `` `${storagePrefix}.launcher` `` | `{"edge":"left"\|"right"\|"top"\|"bottom","offset":0..1}` — which viewport edge the launcher is docked against, and how far along that edge it sits | Bottom of the right edge |
+
+Pins and Highlights are two keys rather than one because they are two
+independent axes: turning either off must never turn the other off. Hiding
+the pins is the permanent counterpart to holding `h` — see [Keyboard and
+accessibility](https://github.com/R3-Lab/web-review/blob/main/docs/keyboard.md).
 
 The launcher's position is an edge plus a fraction rather than a pixel pair on
 purpose: a fraction survives a viewport resize — or the same stored value

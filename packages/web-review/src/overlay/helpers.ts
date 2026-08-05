@@ -51,9 +51,73 @@ export function clampToDocument(
   };
 }
 
-/** True when the resolver could not re-bind the anchor with confidence. */
-export function isDrifted(resolved: ResolveResult | undefined): boolean {
-  return !resolved || resolved.confidence < CONFIDENCE_THRESHOLD;
+/**
+ * Where a thread's pin can honestly be drawn, and what the overlay is
+ * entitled to SAY about it.
+ *
+ * This used to be one boolean (`isDrifted`: `!resolved || confidence <
+ * CONFIDENCE_THRESHOLD`), which collapsed two genuinely different facts into
+ * one badge. `resolveAnchor` (see `../anchor.ts`) has three outcomes, not
+ * two:
+ *
+ *   - it matched an element at or above {@link CONFIDENCE_THRESHOLD}
+ *     ⇒ `anchored`. The pin rides the live rect.
+ *   - it found a best candidate but scored it BELOW the threshold
+ *     ⇒ `drifted`. Something on this page still resembles what was pinned,
+ *     but not enough to trust it, and the usual reason is that the content
+ *     moved or changed under the anchor. Saying "the page changed" here is a
+ *     claim the resolver actually supports.
+ *   - it found nothing to score at all (`el`/`rect` both absent, or the
+ *     caller has no resolution for this thread yet)
+ *     ⇒ `unplaceable`. All we know is where the pin was dropped. We do NOT
+ *     know that the page changed — the element may simply never have been
+ *     on this page. Badging that as "drift" tells a reviewer their page
+ *     changed when it may not have, and blames content for what can equally
+ *     be a data-scoping or navigation mismatch. The copy for this state must
+ *     therefore assert nothing beyond "we could not find it here".
+ *
+ * Returned as a discriminated union rather than two predicates for two
+ * reasons: the states are mutually exclusive, so a shape that cannot express
+ * "drifted AND unplaceable" is worth more than two booleans a call site has
+ * to remember to combine correctly; and `anchored` is the only state that
+ * carries a usable live rect, so hanging that rect off the variant removes
+ * the `resolved?.rect &&` re-check every call site otherwise repeats (and
+ * could get wrong) after asking about drift.
+ *
+ * NOTE the deliberate removal: `isDrifted` is gone rather than narrowed. It
+ * was never part of the package's public surface (`./helpers` is not
+ * re-exported from `../index.ts`, `../surfaces.ts`, `../server/index.ts` or
+ * `../next/index.ts`), so nothing outside this directory can break — and
+ * every in-package call site is forced by the compiler to re-decide which of
+ * the two states it meant, instead of silently keeping the old conflation
+ * under a name whose meaning quietly changed.
+ */
+export type AnchorPlacement =
+  | { readonly state: "anchored"; readonly rect: DOMRect }
+  | { readonly state: "drifted" }
+  | { readonly state: "unplaceable" };
+
+/**
+ * Classify a thread's live anchor resolution — see {@link AnchorPlacement}
+ * for what each state licenses the UI to claim.
+ *
+ * `undefined` means the caller has no resolution for this thread (it hasn't
+ * resolved yet, or the thread isn't in its resolution map), which is
+ * `unplaceable` for the same reason a zero-candidate resolve is: we have
+ * nothing on THIS page to point at, and no evidence about why.
+ *
+ * A resolve that scored at/above the threshold but carries no `rect` cannot
+ * be drawn against anything, so it degrades to `drifted` rather than
+ * `anchored` — the resolver never produces that pair (it sets `el` and
+ * `rect` together), but the type permits it, and drawing at the captured
+ * rect is the safe reading of "we matched something we can't measure".
+ */
+export function anchorPlacement(resolved: ResolveResult | undefined): AnchorPlacement {
+  if (!resolved || (!resolved.el && !resolved.rect)) return { state: "unplaceable" };
+  if (resolved.confidence >= CONFIDENCE_THRESHOLD && resolved.rect) {
+    return { state: "anchored", rect: resolved.rect };
+  }
+  return { state: "drifted" };
 }
 
 /**
@@ -80,6 +144,43 @@ export function LiveRegion({
   );
 }
 
+/**
+ * The read/write pair every persisted on/off UI preference in this file goes
+ * through — one implementation, not one per switch.
+ *
+ * Each of these preferences wants the identical posture: default ON, `"0"`
+ * the only value that means off (so an absent key, a cleared store and a
+ * value written by an older build all read as on), and any storage failure —
+ * Safari's private mode, a blocked third-party context, a full quota —
+ * swallowed rather than allowed to take the overlay down with it.
+ *
+ * Writing that out per switch is how two switches quietly diverge: the second
+ * one gets a `catch` that returns `false`, or starts treating `null` as off,
+ * and a reviewer who never touched it loses a layer for no reason they can
+ * see. Sharing the body makes "exactly the same posture" structural instead
+ * of a claim in a comment.
+ *
+ * Default-ON on failure specifically, not merely "some default": these keys
+ * gate things a reviewer came here to look at. A storage error must never be
+ * the reason feedback is invisible.
+ */
+function readVisibilityFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/** Persist an on/off preference. Silently no-ops when storage throws. */
+function writeVisibilityFlag(key: string, value: boolean): void {
+  try {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // Storage unavailable; the choice stays in memory for this session.
+  }
+}
+
 /** The localStorage key holding the persisted "show highlights" choice. */
 export function showHighlightsStorageKey(prefix: string): string {
   return `${prefix}.showHighlights`;
@@ -87,20 +188,45 @@ export function showHighlightsStorageKey(prefix: string): string {
 
 /** The persisted "Show highlights" choice; on by default. */
 export function readShowHighlights(prefix: string): boolean {
-  try {
-    return window.localStorage.getItem(showHighlightsStorageKey(prefix)) !== "0";
-  } catch {
-    return true;
-  }
+  return readVisibilityFlag(showHighlightsStorageKey(prefix));
 }
 
 /** Persist the "Show highlights" choice. Silently no-ops when storage throws. */
 export function writeShowHighlights(prefix: string, value: boolean): void {
-  try {
-    window.localStorage.setItem(showHighlightsStorageKey(prefix), value ? "1" : "0");
-  } catch {
-    // Storage unavailable; the choice stays in memory for this session.
-  }
+  writeVisibilityFlag(showHighlightsStorageKey(prefix), value);
+}
+
+/**
+ * The localStorage key holding the persisted "show pins" choice.
+ *
+ * A SEPARATE key from `showHighlights`, driving a separate switch, because
+ * the two layers fail in different ways and a reviewer has to be able to
+ * answer one without paying for the other.
+ *
+ * A highlight is `pointer-events: none` decoration — at worst it obscures
+ * something visually. A pin is a real `<button>` laid over the page, and over
+ * its own anchor at that: the marker's tip touches the anchored point and its
+ * body rises from there, so it covers both the thing it points at and
+ * whatever sits just above it. A pin dropped on a nav link takes that link's
+ * clicks, and until this switch existed neither the reviewer nor the consumer
+ * embedding the overlay had any way to get them back.
+ *
+ * Hence two keys. Hiding highlights to free a click would be a bargain nobody
+ * asked to make, and hiding pins to unblock a page must not also cost the
+ * quoted text a reviewer is reading.
+ */
+export function showPinsStorageKey(prefix: string): string {
+  return `${prefix}.showPins`;
+}
+
+/** The persisted "Show pins" choice; on by default. */
+export function readShowPins(prefix: string): boolean {
+  return readVisibilityFlag(showPinsStorageKey(prefix));
+}
+
+/** Persist the "Show pins" choice. Silently no-ops when storage throws. */
+export function writeShowPins(prefix: string, value: boolean): void {
+  writeVisibilityFlag(showPinsStorageKey(prefix), value);
 }
 
 /**

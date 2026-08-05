@@ -64,6 +64,38 @@ export async function findThreadsByCommentMarker(marker: string): Promise<Review
   );
 }
 
+/**
+ * Deletes the threads `findThreadsByCommentMarker` would return, and reports
+ * how many went. Comments go with them — `sql/postgres.sql` declares
+ * `review_comment.thread_id` `on delete cascade`.
+ *
+ * For specs whose rows would otherwise interfere with the specs that run
+ * AFTER them, which is a narrow case: the suite shares one database and does
+ * not reset it, and every other spec's pins are anchored to real elements of
+ * the demo page, so they simply re-bind on the next load and sit where they
+ * always sat. `pin-passthrough.spec.ts` is the exception — it pins an element
+ * it injects itself, which is gone on the next load, leaving a pin that
+ * cannot be placed and is therefore drawn at its captured document position
+ * on every subsequent test. That position is in the CTA section other specs
+ * click in.
+ *
+ * Scoped by the caller's own unique marker, never by table or by page: this
+ * removes the rows one test made and nothing else. It is deliberately not a
+ * blanket `afterEach` for the whole suite — the specs that assert persistence
+ * are asserting that these rows SURVIVE.
+ */
+export async function deleteThreadsByCommentMarker(marker: string): Promise<number> {
+  const rows = await query<{ id: string }>(
+    `delete from review_thread t
+      where exists (
+        select 1 from review_comment c where c.thread_id = t.id and c.body like $1
+      )
+      returning t.id`,
+    [`%${marker}%`],
+  );
+  return rows.length;
+}
+
 export async function commentsForThread(threadId: string): Promise<ReviewCommentRow[]> {
   return query<ReviewCommentRow>(
     `select * from review_comment where thread_id = $1 order by created_at asc`,

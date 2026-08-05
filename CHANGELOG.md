@@ -15,6 +15,126 @@ two things that cost an integrator real work.
 
 ---
 
+## [0.4.0] — 2026-08-05
+
+**Schema: no change.** **Store interface: no change.** No export subpath,
+dependency, or peer-dependency range changed.
+
+**⚠️ BREAKING — custom overlay surfaces.** `PanelRenderProps` gains
+`showPins`, `onToggleShowPins`, and `unplaceableCount`. All are required
+members, and the type is public (exported from `.`, `src/index.ts:34`), so
+this is the same shape of source break as 0.2.0's.
+
+The failure modes are asymmetric, and the compiler only catches one of them:
+
+- Code that **constructs** a `PanelRenderProps` — a test harness, a story, a
+  wrapper handing the stock panel hand-built props — stops compiling with
+  `TS2739`. Loud, easy fix.
+- A `renderPanel` callback that only **destructures** the members it uses
+  keeps compiling untouched.
+
+That silent half is milder than 0.2.0's, which left reviewers unable to leave
+feedback at all. A custom panel ignoring these three still lets a reviewer get
+past a pin, because hold-`h` lives in `OverlayRoot` rather than in the panel —
+but it offers no way to hide the pins for good, and nothing surfaces the count
+of pins that could not be placed. Consumers using the default surfaces from
+`@r3lab/web-review/surfaces` are unaffected. Details under *Changed*.
+
+Nothing else here breaks. `isDrifted` is removed outright below, but
+`src/overlay/helpers.ts` is not re-exported from `.`, `./server`, `./next`, or
+`./surfaces`, so nothing outside the package could import it; and no other
+public prop signature moved — `ThreadDetail` still takes
+`resolved: ResolveResult | undefined`, with only its internal computation
+changed.
+
+Four defects reported by an integrator wiring the package into a real app.
+
+### Fixed
+
+- **Pins from one page could paint on another.** Fetched thread lists are now
+  stamped with the `urlKey` they were fetched for, and a pin renders only when
+  both that stamp and the thread's own `urlKey` match the page being drawn
+  (`src/overlay/overlay-root.tsx:462`). Navigating clears the previous page's
+  pins in the same commit rather than leaving them up until a fetch returns.
+
+- **A stale response could replace the current page's threads.** Both async
+  paths commit through `commitThreads`, which discards a result whose page the
+  reviewer has already left (`src/overlay/overlay-root.tsx:509`). Requests do
+  not resolve in the order they were sent, so on a slow connection a list for
+  an abandoned route arriving late and overwriting the live one was ordinary
+  rather than rare.
+
+- **Pins took clicks meant for the page under them.** Three mechanisms, all
+  new: a persisted **Pins** checkbox in the panel header beside Highlights;
+  **hold `h`** for momentary pass-through of the whole pin layer
+  (`src/overlay/overlay-root.tsx:918`); and a hit area trimmed to the painted
+  marker without moving the pin. `h` is a bare letter rather than a modifier
+  because Alt/Ctrl/Meta/Shift each rewrite what the click that follows *means*
+  — download, new tab, new window — which would defeat the purpose
+  (`src/overlay/overlay-root.tsx:155`). It is a hold, not a toggle, it never
+  calls `preventDefault`, it is ignored while a text field has focus, and it
+  is released by `blur` and by the tab going hidden as well as by `keyup`,
+  since `keyup` is not guaranteed to arrive.
+
+- **"Drifted" was claimed for pins that had simply not been found.**
+  `anchorPlacement()` replaces `isDrifted()` and returns three states rather
+  than one boolean (`src/overlay/helpers.ts:115`): `anchored`, `drifted` (a
+  candidate scored below the confidence threshold), and `unplaceable` (nothing
+  matched at all). Only `drifted` licenses copy saying the page changed; an
+  anchor that resolved to nothing may simply never have been on this page, and
+  badging that as drift blames content for what can equally be a navigation or
+  data-scoping mismatch. Pins carry `data-drifted` and `data-unplaceable` as
+  two independent booleans, so `data-drifted="true"` keeps meaning drift and
+  only drift (`src/overlay/pin.tsx:104`).
+
+### Added
+
+- `pollMs` on `ReviewConfig`, default `30000`, down from a hardcoded 60s
+  (`src/core/config.ts:136`). `<= 0` disables the interval **and only the
+  interval** — it is passed through unclamped because "disabled" is a state
+  the overlay reads off the field.
+- Refetch on window `focus` and on `visibilitychange` → visible, throttled,
+  and skipped while the page is going hidden
+  (`src/overlay/overlay-root.tsx:723`). Coming back to a page is the moment a
+  reviewer most expects to be current, and an interval alone serves that
+  badly: it fires while the tab is hidden, then makes them wait out the
+  remainder of a tick once they return. This is why `pollMs: 0` means "not on
+  a clock" rather than "never".
+- A panel summary counting pins that could not be placed on the page — *"3
+  pins couldn't be placed on this page. They are shown where they were
+  dropped."* (`src/overlay/panel.tsx:261`). It counts `unplaceable` only,
+  never `drifted`: one number covering both would rebuild the conflation this
+  release exists to end.
+- `${storagePrefix}.showPins` — `"1"`/`"0"`, default on. A separate key from
+  `showHighlights` because they are separate axes (`src/overlay/helpers.ts:218`).
+
+### Changed
+
+- **`PanelRenderProps` gained three required members:** `showPins`,
+  `onToggleShowPins`, and `unplaceableCount`
+  (`src/overlay/overlay-root.tsx:340`, `:341`, `:358`).
+
+  **Breaking only for code that constructs the object** — a test harness, a
+  story, a wrapper handing a stock surface hand-built props — which stops
+  compiling with `TS2739`. A `renderPanel` callback that destructures only
+  what it uses keeps compiling untouched. A custom panel that ignores them
+  still works (hold-`h` lives in `OverlayRoot`, not the panel) but offers no
+  way to hide the pins permanently and no page-level account of unplaceable
+  ones. See [Customizing a
+  surface](https://github.com/R3-Lab/web-review/blob/main/docs/customizing.md#upgrading-a-custom-surface).
+
+- The panel's keyboard-shortcut strip gained an **`H` — Hold to click through
+  the pins** entry (`src/overlay/panel.tsx:364`).
+
+### Removed
+
+- `isDrifted()` from `src/overlay/helpers.ts`, replaced by
+  `anchorPlacement()`. Removed rather than narrowed on purpose: it was never
+  importable from any public entry point, and deleting it forces every
+  in-package call site to re-decide which of the two states it meant instead
+  of silently keeping the old conflation under a name whose meaning had
+  quietly changed.
+
 ## [0.3.0] — 2026-07-31
 
 **Schema: no change.** **Store interface: changed — widened, non-breaking for
@@ -234,6 +354,7 @@ Commit: `609b91b`.
 <!-- Each heading above links to the diff that produced that release. 0.1.0 has
      no predecessor to compare against, so it points at the tag itself. -->
 
+[0.4.0]: https://github.com/R3-Lab/web-review/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/R3-Lab/web-review/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/R3-Lab/web-review/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/R3-Lab/web-review/releases/tag/v0.1.0

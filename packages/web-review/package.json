@@ -1,6 +1,6 @@
 {
   "name": "@r3lab/web-review",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "In-page review overlay for React and Next.js apps: pin comments to any DOM element of a preview deployment, bring your own database.",
   "license": "MIT",
   "repository": {

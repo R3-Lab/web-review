@@ -13,7 +13,12 @@ import "@testing-library/jest-dom/vitest";
 
 import { ReviewApiError } from "../core/adapter";
 import { resolveConfig } from "../core/config";
-import type { Anchor, ReviewCommentView, ReviewThreadView } from "../core/types";
+import type {
+  Anchor,
+  ResolveResult,
+  ReviewCommentView,
+  ReviewThreadView,
+} from "../core/types";
 import { ThreadDetail } from "./thread-detail";
 import type { ThreadDetailProps } from "./thread-detail";
 
@@ -96,6 +101,21 @@ function makeAdapter() {
   };
 }
 
+/**
+ * A resolve that bound an element and measured it — what `resolveAnchor`
+ * returns for a match; `confidence` alone separates a confident bind from a
+ * drifted one. A `ResolveResult` with no `el`/`rect` is a different thing
+ * entirely (nothing matched), so the two are never spelled the same way
+ * here — see `./helpers`'s `anchorPlacement`.
+ */
+function boundTo(confidence: number): ResolveResult {
+  return {
+    el: document.createElement("div"),
+    rect: new DOMRect(10, 10, 100, 40),
+    confidence,
+  };
+}
+
 function renderDetail(propsOverride: Partial<ThreadDetailProps> = {}) {
   const adapter = makeAdapter();
   const config = resolveConfig({ adapter });
@@ -106,7 +126,7 @@ function renderDetail(propsOverride: Partial<ThreadDetailProps> = {}) {
   const props: ThreadDetailProps = {
     config,
     thread: makeThread(),
-    resolved: { confidence: 1 },
+    resolved: boundTo(1),
     identity: { id: "u1", name: "Ada" },
     onBack,
     onReply,
@@ -157,19 +177,66 @@ describe("ThreadDetail", () => {
     expect(onToggleStatus).toHaveBeenCalledWith(thread);
   });
 
-  it("shows the drift note when resolved is below the confidence threshold", () => {
-    renderDetail({ resolved: { confidence: 0.1 } });
-    expect(screen.getByText(/page changed since this was pinned/i)).toBeInTheDocument();
+  // ── the two anchor states ────────────────────────────────────────────────
+  // A weak match and no match at all used to share one note, which told a
+  // reviewer their page had changed on the strength of a resolve that had
+  // found nothing to say that about. They are separate states now (see
+  // `./helpers`'s `AnchorPlacement`), and these tests pin the copy of each:
+  // the drift wording is only allowed on a real weak match, and the
+  // not-found wording is only allowed to describe what we looked for and
+  // did not find.
+
+  it("shows the drift note, and only it, for a match below the confidence threshold", () => {
+    renderDetail({ resolved: boundTo(0.1) });
+
+    expect(
+      screen.getByText(
+        /The page changed since this was pinned, so the marker is shown where it was originally dropped/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Drifted")).toBeInTheDocument();
+    expect(screen.queryByText("Not found")).not.toBeInTheDocument();
   });
 
-  it("shows the drift note when resolved is undefined", () => {
+  it("shows the not-found note, and only it, when the resolver matched nothing", () => {
+    renderDetail({ resolved: { confidence: 0 } });
+
+    expect(
+      screen.getByText(
+        /The element this was pinned to could not be found on this page, so the marker is shown where the pin was dropped/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not found")).toBeInTheDocument();
+    expect(screen.queryByText("Drifted")).not.toBeInTheDocument();
+  });
+
+  it("treats a thread with no resolution yet as not-found, never as drifted", () => {
     renderDetail({ resolved: undefined });
-    expect(screen.getByText(/page changed since this was pinned/i)).toBeInTheDocument();
+
+    expect(screen.getByText("Not found")).toBeInTheDocument();
+    expect(screen.queryByText("Drifted")).not.toBeInTheDocument();
   });
 
-  it("does not show the drift note when resolved is confident", () => {
-    renderDetail({ resolved: { confidence: 0.9 } });
-    expect(screen.queryByText(/page changed since this was pinned/i)).not.toBeInTheDocument();
+  it("never claims the page changed when all the resolver did was fail to find the element", () => {
+    const { container } = renderDetail({ resolved: { confidence: 0 } });
+    const note = container.querySelector(".r3wr-unplaceable-note");
+
+    expect(note).not.toBeNull();
+    expect(note?.textContent).not.toMatch(/drift/i);
+    expect(note?.textContent).not.toMatch(/changed/i);
+    expect(note?.textContent).not.toMatch(/guessed/i);
+    // …but it does still say where the marker is and what it was on.
+    expect(note?.textContent).toMatch(/shown where the pin was dropped/i);
+    expect(note?.textContent).toMatch(/It was on: "Target"/);
+  });
+
+  it("shows neither note when the anchor resolves confidently", () => {
+    const { container } = renderDetail({ resolved: boundTo(0.9) });
+
+    expect(container.querySelector(".r3wr-drift-note")).toBeNull();
+    expect(container.querySelector(".r3wr-unplaceable-note")).toBeNull();
+    expect(screen.queryByText("Drifted")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not found")).not.toBeInTheDocument();
   });
 
   it("renders a screenshot thumbnail only when screenshotUrl is set", () => {

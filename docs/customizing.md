@@ -67,17 +67,29 @@ because the render prop was invoked, not because the surface merely rendered.
 
 ## Upgrading a custom surface
 
-Two of those contracts gained required members
-when the launcher stopped arming pin-drop mode (see [Keyboard and
-accessibility](https://github.com/R3-Lab/web-review/blob/main/docs/keyboard.md)): `PanelRenderProps` gained
-`pinDropMode`, `onTogglePinDrop`, and `panelSide`; `ComposerRenderProps`
-gained `panelSide`. What that breaks at compile time is narrower than it
-sounds, and the half it *doesn't* break is the dangerous one:
+These contracts have gained required members twice.
+
+**In 0.4.0**, `PanelRenderProps` gained `showPins`, `onToggleShowPins`, and
+`unplaceableCount` — the panel's Pins checkbox and its summary of pins that
+couldn't be placed (see [How anchoring
+works](https://github.com/R3-Lab/web-review/blob/main/docs/anchoring.md)).
+`onToggleShowPins` is deliberately not named `onTogglePins`, which would have
+matched `onToggleHighlights`: this surface already has an `onTogglePinDrop`,
+and two callbacks a character apart meaning "hide the markers" and "arm
+picking" is a mistake waiting to be made.
+
+**In 0.2.0**, when the launcher stopped arming pin-drop mode (see [Keyboard
+and accessibility](https://github.com/R3-Lab/web-review/blob/main/docs/keyboard.md)),
+`PanelRenderProps` gained `pinDropMode`, `onTogglePinDrop`, and `panelSide`;
+`ComposerRenderProps` gained `panelSide`.
+
+What either break costs at compile time is narrower than it sounds, and the
+half it *doesn't* break is the dangerous one:
 
 - Code that **constructs** one of these objects — a test harness, a story, a
   wrapper handing a stock surface hand-built props — stops compiling:
   `TS2739: … is missing the following properties from type 'PanelRenderProps':
-  panelSide, pinDropMode, onTogglePinDrop`. Add them and it builds again.
+  showPins, onToggleShowPins, unplaceableCount`. Add them and it builds again.
 - A `renderPanel`/`renderComposer` **callback** that only destructures the
   members it uses keeps compiling untouched, because a function taking fewer
   properties is still assignable where one taking more is expected. So a
@@ -88,7 +100,17 @@ sounds, and the half it *doesn't* break is the dangerous one:
 A custom panel therefore needs its own arm/disarm control calling
 `onTogglePinDrop` and reflecting `pinDropMode` (the stock `Panel` renders it
 as one button whose `aria-pressed` carries the state and whose label changes
-word). `panelSide` is `"left"` or `"right"` — which viewport edge the panel is
+word).
+
+The 0.4.0 additions have a milder version of the same silent half. A custom
+panel that ignores `showPins`/`onToggleShowPins` still works — holding `h`
+gives a reviewer a way past a pin regardless, since that lives in
+`OverlayRoot` rather than in the panel — but it offers no way to hide the
+pins for good, and nothing surfaces `unplaceableCount`, so a reviewer gets no
+page-level account of pins that couldn't be placed. Both are worth
+reimplementing; neither is load-bearing the way `onTogglePinDrop` is.
+
+`panelSide` is `"left"` or `"right"` — which viewport edge the panel is
 docked against right now, following the launcher — so a custom composer can
 keep itself, and its submit button in particular, out from under it. Below
 560px there is no side to avoid: the stock stylesheet turns the panel into a

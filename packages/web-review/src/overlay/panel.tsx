@@ -2,8 +2,8 @@
 
 /**
  * `Panel` — the side panel: the thread list for the current page (filter,
- * highlight-visibility toggle, close) or, once a thread is selected,
- * `./thread-detail`'s `ThreadDetail`. Plugs into `OverlayRoot` via
+ * the pin/highlight visibility switches, close) or, once a thread is
+ * selected, `./thread-detail`'s `ThreadDetail`. Plugs into `OverlayRoot` via
  * `renderPanel` (see `./overlay-root`'s `PanelRenderProps`).
  *
  * Ported from a working single-app review tool's `feedback-overlay-inner.tsx`
@@ -26,14 +26,20 @@
  *    the detail view is a reading surface with its own primary affordance
  *    (back), and a second primary button there would compete with it for the
  *    one slot a primary action gets.
- *  - **The shortcuts footer.** The overlay's three keyboard paths are now
- *    genuinely undiscoverable otherwise — the launcher's label used to
- *    advertise `c` and no longer does, and the arrow-key launcher move
- *    (WCAG 2.5.7's non-drag alternative to dragging the button) never had a
- *    visible home at all. It documents the OVERLAY, so it renders in both
- *    views, and it is pinned outside `.r3wr-panel-body` so a long thread list
- *    can never scroll it out of reach. Every entry in it is checked against
- *    the code that implements it — see the comments at each `<li>`.
+ *  - **The shortcuts footer.** The overlay's keyboard paths are now genuinely
+ *    undiscoverable otherwise — the launcher's label used to advertise `c`
+ *    and no longer does, the arrow-key launcher move (WCAG 2.5.7's non-drag
+ *    alternative to dragging the button) never had a visible home at all, and
+ *    a key you have to HOLD advertises itself least of all. It documents the
+ *    OVERLAY, so it renders in both views, and it is pinned outside
+ *    `.r3wr-panel-body` so a long thread list can never scroll it out of
+ *    reach. Every entry in it is checked against the code that implements
+ *    it — see the comments at each `<li>`.
+ *
+ * And one thing this surface says on the pins' behalf: when several pins on
+ * the page could not be placed, the list view carries a single summary line
+ * instead of leaving a wall of identical badges out on the page to be read
+ * one at a time. What it is allowed to claim is narrow — see its comment.
  */
 
 import { useId } from "react";
@@ -62,6 +68,9 @@ export function Panel({
   panelSide,
   showHighlights,
   onToggleHighlights,
+  showPins,
+  onToggleShowPins,
+  unplaceableCount,
   pinDropMode,
   onTogglePinDrop,
   onClose,
@@ -109,10 +118,6 @@ export function Panel({
         <h2 className="r3wr-panel-title" id={`${ids}-title`} {...TAG}>
           {selected ? "Thread" : "Feedback on this page"}
         </h2>
-        <label className="r3wr-highlight-toggle" {...TAG}>
-          <input type="checkbox" {...TAG} checked={showHighlights} onChange={onToggleHighlights} />
-          <span {...TAG}>Highlights</span>
-        </label>
         <button
           type="button"
           className="r3wr-icon-btn"
@@ -122,6 +127,41 @@ export function Panel({
         >
           <XIcon size={17} />
         </button>
+
+        {/* The two layer switches, on their own row (see `.r3wr-visibility` in
+            `overlay.css` for why they cannot share the title's line).
+
+            A named group rather than two loose checkboxes: "Pins" and
+            "Highlights" are only meaningful as a pair, and a checkbox called
+            "Pins" reached in isolation — which is exactly how a screen-reader
+            user meets it — says nothing about what it does to them.
+
+            Pins first because it is the switch that matters most: a highlight
+            can only ever obscure something, while a pin is a real button
+            laid over the page that takes clicks meant for whatever is under
+            it. This is the reviewer's way out of that, and the hold key in
+            the shortcuts strip below is the momentary version of the same
+            escape. */}
+        <div
+          className="r3wr-visibility"
+          role="group"
+          aria-label="Show on the page"
+          {...TAG}
+        >
+          <label className="r3wr-visibility-toggle" {...TAG}>
+            <input type="checkbox" {...TAG} checked={showPins} onChange={onToggleShowPins} />
+            <span {...TAG}>Pins</span>
+          </label>
+          <label className="r3wr-visibility-toggle" {...TAG}>
+            <input
+              type="checkbox"
+              {...TAG}
+              checked={showHighlights}
+              onChange={onToggleHighlights}
+            />
+            <span {...TAG}>Highlights</span>
+          </label>
+        </div>
       </div>
 
       {/* The panel's primary action, and the only one on this surface. A
@@ -196,6 +236,32 @@ export function Panel({
                 </button>
               ))}
             </div>
+
+            {/* One line for the whole page in place of N identical badges.
+                Absent entirely at zero — a "0 pins couldn't be placed" that
+                sits there permanently is a warning about nothing.
+
+                The copy asserts only what was observed, and stops. It does
+                NOT say the page changed, because nothing here supports that:
+                an anchor that resolves to nothing is just as consistent with
+                a page that never held it (a reviewer on a different
+                environment, a different data set, a route that renders the
+                same key differently) as with one that was edited. Same
+                discipline as `./thread-detail`'s own not-found note and
+                `./pin`'s `ANCHOR_NOTES` — we looked, we did not find it, and
+                here is where the pin was dropped.
+
+                And it counts `unplaceable` only, never `drifted`. Those are
+                two different findings with two different things worth saying,
+                and one number covering both would be the conflation
+                `anchorPlacement` was split apart to end. */}
+            {unplaceableCount > 0 && (
+              <p className="r3wr-unplaceable-summary" {...TAG}>
+                {unplaceableCount === 1
+                  ? "1 pin couldn't be placed on this page. It is shown where it was dropped."
+                  : `${unplaceableCount} pins couldn't be placed on this page. They are shown where they were dropped.`}
+              </p>
+            )}
 
             {threads.length === 0 ? (
               <p className="r3wr-muted" {...TAG}>
@@ -286,6 +352,18 @@ export function Panel({
             <kbd {...TAG}>Esc</kbd>
             <span {...TAG}>Close / cancel</span>
           </li>
+          {/* `OverlayRoot`'s pass-through effect: `PASS_THROUGH_KEY`, held.
+              Verified against that handler rather than assumed — it is a HOLD
+              (keydown arms, keyup and every stranding event release it), it
+              is ignored while a text field has focus, and it frees the whole
+              pin layer rather than one pin, which is why the label says "the
+              pins" and not "a pin". A letter and not Alt: the click that
+              follows has to be an ordinary click, and every modifier changes
+              what clicking a link does. */}
+          <li {...TAG}>
+            <kbd {...TAG}>H</kbd>
+            <span {...TAG}>Hold to click through the pins</span>
+          </li>
           {/* `Launcher`'s own `onKeyDown` + `edgeForArrowKey` — the WCAG 2.5.7
               non-drag alternative to dragging the button to an edge. These
               are NOT global: the launcher has to have focus, and the label
@@ -300,6 +378,16 @@ export function Panel({
             <span {...TAG}>Move the Review button, while it has focus</span>
           </li>
         </ul>
+        {/* The permanent counterpart to the hold key, named here because the
+            two answer the same question and a reviewer who has just found one
+            should be told about the other. Outside the list, not a fourth
+            entry in it: the list is called "Keyboard shortcuts" and every
+            item in it is a key, whereas this is a pair of checkboxes. Filing
+            a checkbox under keyboard shortcuts would make the list's own name
+            the first inaccurate claim in the strip. */}
+        <p className="r3wr-shortcuts-note" {...TAG}>
+          To hide the pins for good, use <strong {...TAG}>Pins</strong> at the top of this panel.
+        </p>
       </footer>
     </aside>
   );

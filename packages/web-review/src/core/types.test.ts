@@ -98,6 +98,7 @@ describe("resolveConfig", () => {
       "/tr/flyer",
     );
     expect(resolved.requireUnlock).toBe(false);
+    expect(resolved.pollMs).toBe(30_000);
     expect(resolved.enabled).toBeUndefined();
     expect(resolved.debug).toBe(false);
   });
@@ -119,6 +120,7 @@ describe("resolveConfig", () => {
       localeFromHref,
       urlKeyFromHref,
       requireUnlock: false,
+      pollMs: 5_000,
       enabled: true,
       debug: true,
     });
@@ -131,6 +133,7 @@ describe("resolveConfig", () => {
     expect(resolved.urlKeyFromHref).toBe(urlKeyFromHref);
     // Explicit `false` must win even though `adapter.unlock` is present.
     expect(resolved.requireUnlock).toBe(false);
+    expect(resolved.pollMs).toBe(5_000);
     expect(resolved.enabled).toBe(true);
     expect(resolved.debug).toBe(true);
   });
@@ -143,6 +146,31 @@ describe("resolveConfig", () => {
   it("derives requireUnlock false when adapter.unlock is absent", () => {
     const adapter = makeAdapter();
     expect(resolveConfig({ adapter }).requireUnlock).toBe(false);
+  });
+
+  describe("pollMs", () => {
+    // `pollMs` is passed through verbatim, non-positive values included: the
+    // overlay reads "the interval is switched off" off this field, so
+    // clamping it to a floor here would take that state away. See
+    // `ReviewConfig.pollMs`, and `../overlay/overlay-root.test.tsx`'s
+    // "polling" suite for what each value does once the overlay has it.
+    it("defaults to 30000 — half the 60s cadence it replaces", () => {
+      expect(resolveConfig({ adapter: makeAdapter() }).pollMs).toBe(30_000);
+    });
+
+    it("takes an explicit value verbatim", () => {
+      expect(resolveConfig({ adapter: makeAdapter(), pollMs: 1_500 }).pollMs).toBe(1_500);
+    });
+
+    it("preserves 0 rather than falling back to the default", () => {
+      // The trap this guards: a `||` default would read 0 as "unset" and
+      // silently restore 30s polling on the one consumer who asked for none.
+      expect(resolveConfig({ adapter: makeAdapter(), pollMs: 0 }).pollMs).toBe(0);
+    });
+
+    it("preserves a negative value rather than clamping it", () => {
+      expect(resolveConfig({ adapter: makeAdapter(), pollMs: -1 }).pollMs).toBe(-1);
+    });
   });
 
   describe("screenshots", () => {

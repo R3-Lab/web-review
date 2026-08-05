@@ -50,6 +50,20 @@ export interface ReviewConfig {
    */
   requireUnlock?: boolean;
   /**
+   * How often, in milliseconds, the overlay re-fetches the current page's
+   * threads so two reviewers on the same page see each other's pins.
+   * Default `30000`.
+   *
+   * `0` (or any value `<= 0`) disables the interval — and ONLY the
+   * interval. The overlay always refetches when the page regains focus or
+   * becomes visible again, which is the case a poll mostly exists to cover
+   * (switch tab, come back, expect to be current), so `0` means "refresh
+   * when I come back to the page, not on a clock", never "never refresh".
+   * That is the setting for an app that pays per request, or one where the
+   * overlay shares a rate limit with the host page.
+   */
+  pollMs?: number;
+  /**
    * Explicit override of whether the overlay mounts at all. Leave unset to
    * defer to the mount gate's own default (e.g. preview-deployment
    * detection, owned by the client runtime that calls `resolveConfig`);
@@ -91,6 +105,15 @@ export interface ResolvedReviewConfig {
   urlKeyFromHref: (href: string) => string;
   requireUnlock: boolean;
   /**
+   * Poll cadence in milliseconds, defaulted to `30000`. Passed through
+   * verbatim, including a non-positive value: "disabled" is a state the
+   * overlay has to be able to read off this field, so `resolveConfig` does
+   * not clamp it to some minimum. `<= 0` switches the interval off while
+   * leaving the focus/visibility refetch running — see
+   * `ReviewConfig.pollMs`.
+   */
+  pollMs: number;
+  /**
    * Left optional deliberately: `undefined` means "no override was given",
    * and the mount gate (owned outside this file — see `ReviewConfig.enabled`)
    * decides the actual default from there.
@@ -110,6 +133,7 @@ export function resolveConfig(config: ReviewConfig): ResolvedReviewConfig {
     localeFromHref: config.localeFromHref ?? (() => null),
     urlKeyFromHref: config.urlKeyFromHref ?? normalizeUrl,
     requireUnlock: config.requireUnlock ?? config.adapter.unlock != null,
+    pollMs: config.pollMs ?? 30_000,
     enabled: config.enabled,
     debug: config.debug ?? false,
   };

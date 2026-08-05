@@ -1,6 +1,7 @@
 /**
- * Review overlay — shell styles (mount gate chrome, pins, highlights, drift,
- * the launcher). `r3wr-` prefixed, self-contained, no Tailwind.
+ * Review overlay — shell styles (mount gate chrome, pins, highlights, the
+ * drifted / not-found anchor states, the launcher). `r3wr-` prefixed,
+ * self-contained, no Tailwind.
  *
  * Ported from a working single-app review tool's `feedback-overlay.css`
  * ("Modern Dark"), generalized: `afb-` → `r3wr-`, `--fb-*` → `--r3wr-*`. The
@@ -19,12 +20,18 @@
  *  - Category is never encoded by hue alone: every pin carries a category
  *    glyph (see `icons.tsx`). Status is orthogonal and encoded by FORM
  *    (filled = open, outlined = resolved), so the two axes never collide.
+ *  - The anchor axis obeys the same rule. "Drifted" (a weak match) and "not
+ *    found" (no match at all) are separated by dash pattern, opacity, glyph
+ *    and word — never by amber-vs-slate alone. Read this file in greyscale
+ *    and every state is still legible.
  *
  * This file covers: root layout + design tokens, the launcher (its look, and
  * its docking to any of the four viewport edges), the capture scrim/hint,
- * pins + the draft marker, highlights + the hover-to-select preview, and the
+ * pins + their hit area + the draft marker, the pin layer's momentary
+ * pass-through state, highlights + the hover-to-select preview, and the
  * screen-reader-only live region — the overlay's shell — plus the side panel
- * (docked to either side, following the launcher), its "New comment" control
+ * (docked to either side, following the launcher), its visibility switches,
+ * its "N pins couldn't be placed" summary, its "New comment" control
  * and keyboard-shortcuts strip, thread cards, thread detail,
  * composer/field/button primitives, the category picker, the spinner, the
  * narrow-screen bottom-sheet layout, and the `afb-pop`/`afb-slide-in`/
@@ -61,8 +68,14 @@
   --r3wr-cat-other: #94a3b8;
   --r3wr-cat-fg: #0f172a;
 
-  /* A third axis: the resolver could not re-bind this anchor. */
+  /* A third axis: how well the anchor still binds to THIS page. Two states,
+     because "we found a weak match" and "we found nothing" are different
+     facts and only the first licenses blaming the page (see
+     `helpers.ts#anchorPlacement`). Amber warns; slate reports an absence —
+     but neither carries the meaning on its own: drift is dashed, not-found
+     is dotted AND faded, and both are spelled out in words. */
   --r3wr-drifted: #fbbf24;
+  --r3wr-unplaceable: #cbd5e1;
 
   --r3wr-radius: 10px;
   --r3wr-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
@@ -256,7 +269,10 @@ body.r3wr-picking {
 /* Two orthogonal axes, neither of them hue-only:
      CATEGORY → the glyph inside, plus its hue (--r3wr-cat, set inline)
      STATUS   → the FORM: filled = open, outlined = resolved
-   A third state, "drifted", adds an amber dashed ring on top of both. */
+   A third axis rides on top of both — how well the anchor still binds to
+   this page — and it too is carried by FORM, not hue: a DASHED ring for a
+   weak match ("drifted"), a DOTTED and faded one for no match at all
+   ("not found"). Print either in greyscale and they stay tellable apart. */
 .r3wr-pin-layer .r3wr-pin {
   position: absolute;
   width: 30px;
@@ -298,8 +314,39 @@ body.r3wr-picking {
   border: 2px solid var(--r3wr-bg);
   box-shadow: var(--r3wr-shadow);
   cursor: pointer;
-  pointer-events: auto;
+  /* NOT `auto`: `.r3wr-pin-hit` below is what catches clicks, and it is
+     shaped like the marker instead of like the marker's box. */
+  pointer-events: none;
   animation: r3wr-pin-in var(--r3wr-t-in) both;
+}
+/* The pin's hit area — the teardrop that is actually drawn, not the 30×30
+   box it is drawn inside.
+   The box is a square rotated -45°, so three of its four corners stick out
+   past the round body by ~6px each (the fourth is the tip, which IS drawn).
+   Those corners are up to ~21px from the marker's centre in the four
+   diagonal directions, and every one of them was swallowing clicks meant for
+   the page — a pin dropped near a nav link could take that link's clicks
+   from a point where nothing was even painted.
+   NOTHING about where the pin renders changes here: the button keeps its
+   size, its margins and its rotation, so the tip still lands exactly on the
+   anchor point (see the derivation above, which `e2e/helpers.ts`'s `tipOf()`
+   and `reload-anchor.spec.ts` both depend on). Only what catches a click
+   moves.
+   `inset: -2px` walks this box back out over the button's 2px border so it
+   is exactly the 30×30 border box — which is the coordinate space `path()`
+   resolves against (`clip-path`'s default reference box is `border-box`).
+   The path is the same shape `border-radius: 50% 50% 50% 0` paints on a
+   30×30 box: a full circle of radius 15 about the centre, opened at the
+   bottom-left into the sharp corner. Read as: start at the left edge's
+   midpoint, sweep the long way round the circle (large-arc, clockwise) to
+   the bottom edge's midpoint, then cut across to the sharp corner and close.
+   Clipped-away area does not hit-test, which is the whole point; the child
+   paints nothing, so clipping it costs no shadow, no border and no ring. */
+.r3wr-pin-layer .r3wr-pin-hit {
+  position: absolute;
+  inset: -2px;
+  clip-path: path("M0 15A15 15 0 1 1 15 30L0 30Z");
+  pointer-events: auto;
 }
 /* Counter-rotate the glyph so it sits upright in the teardrop. */
 .r3wr-pin-layer .r3wr-pin > svg {
@@ -318,6 +365,16 @@ body.r3wr-picking {
 .r3wr-pin-layer .r3wr-pin[data-drifted="true"] {
   border-color: var(--r3wr-drifted);
   border-style: dashed;
+}
+/* Not found: nothing on this page matched, so the marker sits at its dropped
+   position on trust alone. Dotted (a broken ring, not a dashed one) and
+   slightly faded, so it reads as provisional next to a drifted pin even with
+   the hue removed. Still fully opaque enough to click — a pin we can't place
+   is still a comment someone left, and it never disappears. */
+.r3wr-pin-layer .r3wr-pin[data-unplaceable="true"] {
+  border-color: var(--r3wr-unplaceable);
+  border-style: dotted;
+  opacity: 0.78;
 }
 .r3wr-pin-layer .r3wr-pin[data-selected="true"] {
   outline: 3px solid var(--r3wr-fg);
@@ -345,6 +402,32 @@ body.r3wr-picking {
   transform: rotate(45deg);
 }
 
+/* ── Momentary pass-through (the hold key) ───────────────────────────────── */
+/* While the pass-through key is held, this whole layer stops catching
+   anything — see `overlay-root.tsx`'s `PASS_THROUGH_KEY`. The universal
+   selector is deliberate and is the point of the rule: the promise is "for as
+   long as this key is down, NOTHING in the pin layer intercepts a click", and
+   a list of the two class names that happen to be interactive today would
+   quietly stop being that promise the first time a third one is added.
+   Placed after the pin rules above rather than merged into them because it
+   ties with them on specificity and has to win — this is a momentary override
+   of whatever those rules decided.
+
+   The fade is feedback, not decoration. A held modifier has no other way to
+   report that it is doing something: this is not an action, so it must not
+   speak into the live region (a message per keypress is noise, and key repeat
+   would make it a stream), and there is no control to press in. Going faint
+   says "held" and reveals the page underneath in the same gesture, which is
+   what the key was reached for. It is also the reason the pins are faded
+   rather than hidden outright — a reviewer needs to see where they are in
+   order to aim past them. */
+.r3wr-pin-layer[data-passthrough="true"] * {
+  pointer-events: none;
+}
+.r3wr-pin-layer[data-passthrough="true"] {
+  opacity: 0.35;
+}
+
 /* ── Highlights ──────────────────────────────────────────────────────────── */
 /* Page-anchored boxes in document coords. Purely visual; never block the page. */
 .r3wr-pin-layer .r3wr-highlight {
@@ -370,6 +453,15 @@ body.r3wr-picking {
 .r3wr-pin-layer .r3wr-highlight[data-drifted="true"] {
   border-color: var(--r3wr-drifted);
   border-style: dashed;
+}
+/* Same two forms as the pin above, for the same reason: dashed = weak match,
+   dotted + faded = no match. Kept adjacent to the drifted rule (and after
+   both `data-kind` rules, which it shares specificity with) so the two
+   states are read and edited as the pair they are. */
+.r3wr-pin-layer .r3wr-highlight[data-unplaceable="true"] {
+  border-color: var(--r3wr-unplaceable);
+  border-style: dotted;
+  opacity: 0.78;
 }
 .r3wr-pin-layer .r3wr-highlight[data-selected="true"] {
   outline: 2px solid var(--r3wr-fg);
@@ -507,9 +599,12 @@ body.r3wr-picking {
   border-right: 1px solid var(--r3wr-border-strong);
   animation-name: r3wr-slide-in-left;
 }
+/* Two rows, not one — see `.r3wr-visibility` below for why the switches get
+   a line of their own. `flex-wrap` is what lets that group ask for it. */
 .r3wr-root .r3wr-panel-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--r3wr-border);
@@ -626,6 +721,18 @@ body.r3wr-picking {
   display: inline-flex;
   gap: 3px;
 }
+/* The pointer-operated escape, sitting under the keyboard ones rather than
+   inside them — see the comment at its JSX in `./panel.tsx`. Separated by a
+   little more space than the list's own row gap so it reads as a note about
+   the strip rather than a fifth row of it. */
+.r3wr-root .r3wr-shortcuts-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+.r3wr-root .r3wr-shortcuts-note strong {
+  color: var(--r3wr-fg);
+  font-weight: 700;
+}
 
 /* Key caps, matching `.r3wr-capture-hint kbd` — a key looks the same
    wherever the overlay names one. */
@@ -661,7 +768,26 @@ body.r3wr-picking {
   color: var(--r3wr-fg);
 }
 
-.r3wr-root .r3wr-highlight-toggle {
+/* ── The header's visibility switches (Pins / Highlights) ────────────────── */
+/* `flex: 1 0 100%` puts the pair on their own row under the title instead of
+   competing with it for the header's single line. They do not fit beside it:
+   a 384px dock less its padding leaves ~364px, and the title alone
+   ("Feedback on this page", 13px monospace) is ~165px of that, the two
+   switches ~165px more, and the close button another 44px. Something had to
+   give, and the alternatives were worse — truncating the panel's own title
+   with an ellipsis, or shrinking two 44px touch targets under the size
+   guidance every other control here meets. A second row spends 44px of
+   chrome once and keeps all four intact.
+   One shared class for both switches rather than one per switch: they are
+   the same control applied to two layers, and a reviewer reading a row of
+   them should not be able to tell which was added second. */
+.r3wr-root .r3wr-visibility {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 0 100%;
+}
+.r3wr-root .r3wr-visibility-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -673,10 +799,10 @@ body.r3wr-picking {
   cursor: pointer;
   user-select: none;
 }
-.r3wr-root .r3wr-highlight-toggle:hover {
+.r3wr-root .r3wr-visibility-toggle:hover {
   color: var(--r3wr-fg);
 }
-.r3wr-root .r3wr-highlight-toggle input {
+.r3wr-root .r3wr-visibility-toggle input {
   width: 16px;
   height: 16px;
   margin: 0;
@@ -706,11 +832,21 @@ body.r3wr-picking {
   background: var(--r3wr-surface-2);
   color: var(--r3wr-fg);
 }
-.r3wr-root .r3wr-chip[aria-pressed="true"] {
-  background: var(--r3wr-surface-2);
-  border-color: var(--r3wr-fg);
+/* ── "N pins couldn't be placed" ─────────────────────────────────────────── */
+/* One line for the whole page, in place of N identical badges. It borrows the
+   not-found marker's own form — DOTTED edge, the same slate token — so the
+   summary and the pins it is counting are recognisably the same statement,
+   and it stays legible with the hue removed (dotted plus the words, never the
+   colour alone). Deliberately not the amber drift token: this counts only
+   anchors that resolved to nothing, which is a different fact. */
+.r3wr-root .r3wr-unplaceable-summary {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px dotted var(--r3wr-unplaceable);
+  border-radius: var(--r3wr-radius);
+  background: var(--r3wr-surface);
   color: var(--r3wr-fg);
-  font-weight: 700;
+  font-size: 11.5px;
 }
 
 /* ── Thread cards ────────────────────────────────────────────────────────── */
@@ -791,6 +927,23 @@ body.r3wr-picking {
   border-radius: 999px;
   border: 1px dashed var(--r3wr-drifted);
   color: var(--r3wr-drifted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* Not found: the other half of that axis, and never shown alongside the
+   drift chip. Its own word ("Not found"), its own glyph (a circle, against
+   the drift chip's triangle — see `icons.tsx`) and its own border form
+   (dotted, against dashed), so the two never rely on amber-vs-slate to be
+   told apart. */
+.r3wr-root .r3wr-unplaceable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dotted var(--r3wr-unplaceable);
+  color: var(--r3wr-unplaceable);
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
@@ -904,7 +1057,24 @@ body.r3wr-picking {
   font-size: 11.5px;
   font-weight: 500;
 }
-.r3wr-root .r3wr-drift-note svg {
+/* The not-found note: same shape, dotted rather than solid-with-a-thick-rule,
+   because it is a report of an absence rather than a warning about a change.
+   The sentence inside it is the part that must never over-claim — see
+   `thread-detail.tsx`. */
+.r3wr-root .r3wr-unplaceable-note {
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+  margin: 8px 0;
+  border: 1px dotted var(--r3wr-unplaceable);
+  border-radius: 8px;
+  background: var(--r3wr-surface);
+  color: var(--r3wr-unplaceable);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.r3wr-root .r3wr-drift-note svg,
+.r3wr-root .r3wr-unplaceable-note svg {
   flex: none;
   margin-top: 1px;
 }

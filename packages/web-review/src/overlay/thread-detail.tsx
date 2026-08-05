@@ -2,14 +2,20 @@
 
 /**
  * `ThreadDetail` — one thread's comment history (oldest first), a reply box,
- * resolve/reopen, and a drift note. Rendered by `./panel`'s `Panel` when a
- * thread is selected.
+ * resolve/reopen, and a note about the anchor when it no longer binds to
+ * this page. Rendered by `./panel`'s `Panel` when a thread is selected.
  *
  * Ported from a working single-app review tool's `feedback-overlay-inner.tsx`
  * `ThreadDetail` (~1583-1815). `confidence` there (a bare number) is
- * `resolved: ResolveResult | undefined` here, run through `isDrifted` from
- * `./helpers` — the same helper `Pin`/`ThreadHighlight` use, so "drifted"
- * means exactly the same thing everywhere in this package.
+ * `resolved: ResolveResult | undefined` here, run through `anchorPlacement`
+ * from `./helpers` — the same helper `Pin`/`ThreadHighlight` use, so
+ * "drifted" and "not found" mean exactly the same thing everywhere in this
+ * package, and the panel can never contradict the pin the reviewer clicked.
+ *
+ * The two states get different chips and different sentences on purpose. A
+ * drifted anchor licenses "the page changed"; an anchor that resolved to
+ * nothing here does not — see `helpers.ts`'s `AnchorPlacement` for the full
+ * argument.
  *
  * One deliberate addition beyond the reference: the reference's resolve/
  * reopen button was fire-and-forget (no error handling at all). Here it gets
@@ -33,7 +39,7 @@ import {
   RotateCcwIcon,
   TriangleAlertIcon,
 } from "./icons";
-import { categoryAccent, formatTime, isDrifted, resolveCategory } from "./helpers";
+import { anchorPlacement, categoryAccent, formatTime, resolveCategory } from "./helpers";
 import { PasswordForm } from "./unlock-dialog";
 
 const TAG = { [OVERLAY_ATTR]: "" } as const;
@@ -41,7 +47,7 @@ const TAG = { [OVERLAY_ATTR]: "" } as const;
 export interface ThreadDetailProps {
   config: ResolvedReviewConfig;
   thread: ReviewThreadView;
-  /** The thread's live anchor resolution, for the drift note. */
+  /** The thread's live anchor resolution, for the drift / not-found note. */
   resolved: ResolveResult | undefined;
   identity: ReviewerIdentity | null;
   onBack: () => void;
@@ -71,7 +77,7 @@ export function ThreadDetail({
   const [needsPassword, setNeedsPassword] = useState<PendingAction | null>(null);
   const ids = useId();
 
-  const drifted = isDrifted(resolved);
+  const placement = anchorPlacement(resolved);
   const category = resolveCategory(config.categories, thread.category);
   const catStyle = { "--r3wr-cat": categoryAccent(category) } as CSSProperties;
 
@@ -139,10 +145,19 @@ export function ThreadDetail({
           {thread.status === "resolved" ? <CheckIcon size={12} /> : null}
           {thread.status === "resolved" ? "Resolved" : "Open"}
         </span>
-        {drifted && (
+        {/* One chip per anchor state, never both: different word, different
+            glyph, different border form (dashed vs dotted). A reviewer
+            reading this in greyscale still gets the distinction. */}
+        {placement.state === "drifted" && (
           <span className="r3wr-drift-chip" {...TAG}>
             <TriangleAlertIcon size={12} />
             Drifted
+          </span>
+        )}
+        {placement.state === "unplaceable" && (
+          <span className="r3wr-unplaceable-chip" {...TAG}>
+            <CircleAlertIcon size={12} />
+            Not found
           </span>
         )}
         {/* `locale` is free-form and consumer-populated (see `ReviewThreadView.locale`
@@ -168,12 +183,29 @@ export function ThreadDetail({
 
       {/* Never let a reviewer believe a pin is still pointing at what it was
           dropped on when the resolver says otherwise. */}
-      {drifted && (
+      {placement.state === "drifted" && (
         <p className="r3wr-drift-note" {...TAG}>
           <TriangleAlertIcon size={14} />
           <span {...TAG}>
             The page changed since this was pinned, so the marker is shown where it was
             originally dropped rather than on a guessed element.
+            {thread.anchor.textHint ? ` It was on: "${thread.anchor.textHint}".` : ""}
+          </span>
+        </p>
+      )}
+
+      {/* And never tell them their page changed when all we know is that we
+          looked and found nothing. Every clause here is something the
+          resolver actually established: it searched this page, it matched
+          nothing, and the marker is therefore at the dropped position. Why
+          it isn't here — edited away, never on this page, a different route
+          — is not ours to claim. */}
+      {placement.state === "unplaceable" && (
+        <p className="r3wr-unplaceable-note" {...TAG}>
+          <CircleAlertIcon size={14} />
+          <span {...TAG}>
+            The element this was pinned to could not be found on this page, so the marker is
+            shown where the pin was dropped.
             {thread.anchor.textHint ? ` It was on: "${thread.anchor.textHint}".` : ""}
           </span>
         </p>

@@ -19,6 +19,13 @@ the package.
   `contenteditable` element has focus, while a draft composer is open, and
   while Ctrl/Cmd/Alt is held; Shift is *not* excluded, so `Shift+C` toggles
   too.
+- **`h`, held**, makes the pin layer stop catching clicks for exactly as long
+  as the key is down, so a reviewer can reach whatever a pin is sitting on
+  top of. It's a *hold*, not a toggle: keydown arms it, keyup releases it.
+  Ignored while a form field or `contenteditable` element has focus, and
+  while Ctrl/Cmd/Alt is held. It is never `preventDefault`ed — the key is
+  observed, not consumed, so the host page and the browser keep whatever
+  they do with it.
 - **Arrow keys** dock the launcher against the left, right, top, or bottom
   edge — while the launcher itself has focus, not globally. This is not a
   convenience for keyboard users: WCAG 2.5.7 (Dragging Movements) requires a
@@ -27,7 +34,7 @@ the package.
 - **Escape** unwinds one layer at a time, in this order: an open unlock
   dialog, then pin-drop mode, then an open draft composer, then the thread
   panel.
-- All three are listed in a strip pinned to the bottom of the panel, present
+- All four are listed in a strip pinned to the bottom of the panel, present
   in both its list and detail views and outside the scrolling body, so a long
   thread list can't push them out of reach. They need that home now: the
   launcher's accessible name used to advertise `c` and no longer does — it
@@ -45,10 +52,44 @@ the package.
   reader's cursor) to do it.
 - A polite ARIA live region (`role="status" aria-live="polite"`) announces
   pin-drop mode changes, pin drops, saved feedback, replies, and
-  resolve/reopen actions.
+  resolve/reopen actions. The hold key deliberately announces nothing: it's a
+  held modifier rather than an action, and key repeat alone would turn one
+  message into a stream. Its feedback is visual and continuous instead — the
+  pin layer goes faint for as long as the key is down.
+
+## Getting at what's under a pin
+
+A highlight can only ever obscure something. A pin is a real button laid over
+the page, so it also takes clicks meant for whatever is beneath it. Three
+mechanisms address that, and they're meant to be used at different scales:
+
+- **Hold `h`** for a moment's pass-through, as above.
+- **The Pins checkbox** in the panel header, beside Highlights, for hiding
+  them for good. It persists (see
+  [localStorage keys](https://github.com/R3-Lab/web-review/blob/main/README.md#localstorage-keys))
+  and is a separate axis from Highlights in both directions — turning one off
+  never turns the other off.
+- **A trimmed hit area**, which is neither of the above: the clickable region
+  was narrowed to the painted marker without moving the pin, so there is less
+  to get in the way before either escape hatch is needed.
+
+Why a bare letter and not `Alt`/`Ctrl`/`Meta`/`Shift`: the point of
+pass-through is that the click reaching the page is the click the reviewer
+would have made with no overlay present, and every modifier rewrites what
+clicking means — Alt or Option downloads the link, Ctrl or Meta opens it in a
+new tab, Shift opens a new window. A modifier-held pass-through would hand
+the page a click nobody asked for.
+
+The held state is released by every event that can mean "this window stopped
+receiving keys" — `keyup`, `blur`, and the tab becoming hidden — because
+`keyup` is not guaranteed to arrive. Hold the key, alt-tab away, and the
+release fires in a window that is no longer listening; without those extra
+releases the layer would stay click-through with no visible cause and no way
+back except a reload. There's no symmetric risk in releasing too eagerly: the
+worst case is a reviewer still holding the key pressing it again.
 
 ---
 
-The launcher's docked position (which edge, and how far along it) survives
-reloads via one `localStorage` key — see the
+The launcher's docked position (which edge, and how far along it) and the
+Pins checkbox both survive reloads via `localStorage` — see the
 [configuration reference](https://github.com/R3-Lab/web-review/blob/main/README.md#localstorage-keys).
